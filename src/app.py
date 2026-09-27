@@ -84,6 +84,7 @@ class Assistant:
         self.stt, self.tts, self.memory, self.store, self.timer = stt, tts, memory, store, timer
         self.restart_ollama = restart_ollama
         self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
+        self.start_url: str | None = None  # optional START_URL secret
         self.budget = Budget(config.NOTIFY_AT, config.STOP_AT)
         self.notices: queue.SimpleQueue = queue.SimpleQueue()  # 90 % warnings to speak
         self.server = None  # uvicorn.Server, set by main.py
@@ -210,6 +211,7 @@ class Assistant:
             "warnings": [notice_text(m, "en") for m in self.budget.warnings(meters)],
             "notify_pct": round(config.NOTIFY_AT * 100),
             "stop_pct": round(config.STOP_AT * 100),
+            "start_url": self.start_url,  # the page's "Start Jarvis" button while offline
         }
 
     def count_net(self, requests: int, nbytes: int) -> None:
@@ -335,7 +337,12 @@ class PasswordGate:
 
 def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    open_paths = {"/login", "/manifest.json"}
+    # App files with no personal data, readable before the password page (fallback mode).
+    app_files = {"/manifest.json": "application/manifest+json",
+                 "/sw.js": "text/javascript",
+                 "/icon-192.png": "image/png", "/icon-512.png": "image/png",
+                 "/apple-touch-icon.png": "image/png"}
+    open_paths = {"/login", *app_files}
 
     @app.middleware("http")
     async def security(request: Request, call_next):
@@ -355,9 +362,10 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
     def index():
         return FileResponse(STATIC_DIR / "index.html")
 
-    @app.get("/manifest.json")
-    def manifest():
-        return FileResponse(STATIC_DIR / "manifest.json")
+    for path, media_type in app_files.items():
+        def serve(path=path, media_type=media_type):
+            return FileResponse(STATIC_DIR / path.lstrip("/"), media_type=media_type)
+        app.add_api_route(path, serve, methods=["GET"])
 
     @app.post("/login")
     async def login(request: Request):

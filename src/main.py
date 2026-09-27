@@ -169,6 +169,8 @@ def _run(ctx: dict) -> None:
                                            port=config.APP_PORT, log_level="warning",
                                            access_log=False))
     assistant.server = server
+    start_url = config.get_secret("START_URL", required=False)  # e.g. GitHub Start Jarvis page
+    assistant.start_url = start_url if start_url and start_url.startswith("https://") else None
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
     ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None)

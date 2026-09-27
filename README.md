@@ -133,6 +133,23 @@ It uses GitHub Actions: free for private repos, and each start takes under a min
 
 If the first start fails with `Missing secret`, open the Jarvis editor once → **Add-ons → Secrets**, check all 6 switches are on, stop the session, and press the button again.
 
+7. **Start button inside the app:** add one more Kaggle secret to Jarvis, `START_URL` = `https://github.com/<you>/personal-voice-assistant/actions/workflows/start-jarvis.yml`. From then on, the Jarvis app shows a green **▶ Start Jarvis** button whenever Jarvis is off.
+
+**Code updates are automatic too.** Once the repo is on GitHub, every `git push` that changes `src/` uploads the code to Kaggle as a new `assistant-code` version (the "Update code on Kaggle" action, which takes about a minute). The next Start uses it, so you never upload the dataset by hand again.
+
+---
+
+## Install Jarvis as an app (PWA)
+
+Open your Jarvis link once while Jarvis is running, and sign in. Then:
+- **Android (Chrome):** menu ⋮ → **Install app** (or "Add to Home screen").
+- **iPhone (Safari):** Share → **Add to Home Screen**.
+- **Laptop (Chrome/Edge):** the install icon in the address bar.
+
+It opens full screen with its own icon. When Jarvis is off, the app still opens and shows **Jarvis is off** plus the **▶ Start Jarvis** button, instead of ngrok's ERR_NGROK_3200 page.
+
+**Speaker and Bluetooth:** the mic is switched off the moment you stop talking, so replies play as normal media: through the **loudspeaker**, or your Bluetooth headphones/car in full music quality. While you talk, Bluetooth may briefly switch to its headset microphone, which is normal.
+
 From a laptop you can do the same with `python scripts/start_jarvis.py` (needs `pip install kaggle` and the two values as environment variables).
 
 **Security note:** your Kaggle token can start notebooks that hold your secrets, so protect the GitHub account like your Kaggle account: two-factor authentication on, and keep the repo private.
@@ -180,7 +197,9 @@ Why facts are not "trained into the model": a model file can be made to repeat w
 ---
 
 ## Updating the code
-Change files in `src/`, zip again (step 4.1), then open the `assistant-code` dataset on Kaggle and click **New Version**. In the assistant notebook's input panel, click the update icon next to `assistant-code`.
+**With GitHub set up:** change files in `src/`, `git commit`, `git push`. That's all: the code is uploaded to Kaggle automatically, and the next Start uses it.
+
+**Without GitHub:** run `python scripts/make_code_zip.py`, then open the `assistant-code` dataset on Kaggle → **New Version** → upload `assistant-code.zip`. In the assistant notebook's input panel, click the update icon next to `assistant-code`.
 
 To change the model, edit `LLM_MODEL` in `src/config.py` **and** `LLM` in the model-cache notebook, then rebuild the cache (step 5).
 

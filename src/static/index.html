@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1115">
 <link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Jarvis">
 <title>Jarvis</title>
 <style>
   :root {
@@ -64,6 +69,9 @@
                      50% { box-shadow: 0 0 0 16px rgba(220,38,38,0); } }
   @media (prefers-reduced-motion: reduce) { body[data-state="listening"] #mic { animation: none; } }
   #status { font-size: 15px; color: var(--muted); min-height: 1.4em; text-align: center; }
+  .start { padding: 10px 18px; border-radius: 999px; background: var(--speak); color: #fff;
+    text-decoration: none; font-weight: 600; }
+  .start[hidden] { display: none; }
 </style>
 </head>
 <body data-state="ready">
@@ -80,13 +88,40 @@
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
     </button>
     <div id="status">Tap to talk</div>
+    <a id="start" class="start" hidden target="_blank" rel="noopener noreferrer">▶ Start Jarvis</a>
   </div>
 </main>
 <script>
 const HEADERS = { "ngrok-skip-browser-warning": "1" };
 const $ = (id) => document.getElementById(id);
-let audioCtx = null, stream = null, recorder = null, chunks = [];
-let playQueue = Promise.resolve(), currentSource = null, turnId = 0, closed = false;
+let stream = null, micCtx = null, recorder = null, chunks = [];
+let playQueue = Promise.resolve(), stopCurrent = null, turnId = 0, closed = false;
+
+// Replies play through a normal <audio> player as MEDIA, and the microphone is
+// released as soon as you stop talking. While a page holds the mic, phones switch
+// to "phone call" audio: sound goes to the earpiece and Bluetooth drops to call
+// quality. Releasing it sends replies to the loudspeaker / Bluetooth media.
+const player = new Audio();
+player.preload = "auto";
+const SILENT_WAV = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+let playerUnlocked = false;
+
+function unlockPlayer() {  // phones only allow playback that starts from a tap
+  if (playerUnlocked) return;
+  playerUnlocked = true;
+  player.src = SILENT_WAV;
+  player.play().catch(() => { playerUnlocked = false; });
+}
+
+function setAudioSession(type) {  // iPhone/iPad Safari 16.4+: "playback" = speaker
+  try { if (navigator.audioSession) navigator.audioSession.type = type; } catch (e) {}
+}
+
+function releaseMic() {
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  if (micCtx) { micCtx.close().catch(() => {}); micCtx = null; }
+  setAudioSession("playback");
+}
 
 function setState(state, text) {
   document.body.dataset.state = state;
@@ -109,25 +144,29 @@ function ping() { fetch("api/ping", { method: "POST", headers: HEADERS }).catch(
 function stopPlayback() {
   turnId++;
   playQueue = Promise.resolve();
-  if (currentSource) { try { currentSource.stop(); } catch (e) {} currentSource = null; }
+  player.pause();
+  if (stopCurrent) { stopCurrent(); stopCurrent = null; }
 }
 
 function enqueueAudio(b64OrBuffer, myTurn) {
   playQueue = playQueue.then(async () => {
     if (myTurn !== turnId || !b64OrBuffer) return;
     const bytes = typeof b64OrBuffer === "string"
-      ? Uint8Array.from(atob(b64OrBuffer), c => c.charCodeAt(0)).buffer : b64OrBuffer;
-    const buffer = await audioCtx.decodeAudioData(bytes);
-    if (myTurn !== turnId) return;
+      ? Uint8Array.from(atob(b64OrBuffer), c => c.charCodeAt(0)) : new Uint8Array(b64OrBuffer);
+    const isWav = bytes[0] === 0x52 && bytes[1] === 0x49;  // "RI"FF
+    const url = URL.createObjectURL(new Blob([bytes], { type: isWav ? "audio/wav" : "audio/mpeg" }));
     setState("speaking", "Speaking… tap to interrupt");
-    await new Promise((resolve) => {
-      const src = audioCtx.createBufferSource();
-      src.buffer = buffer;
-      src.connect(audioCtx.destination);
-      src.onended = resolve;
-      currentSource = src;
-      src.start();
-    });
+    try {
+      await new Promise((resolve) => {
+        stopCurrent = resolve;
+        player.onended = resolve;
+        player.onerror = resolve;
+        player.src = url;
+        player.play().catch(resolve);
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }).catch(() => {});
   return playQueue;
 }
@@ -135,15 +174,17 @@ function enqueueAudio(b64OrBuffer, myTurn) {
 // ---------- recording with automatic stop on silence ----------
 async function startListening() {
   stopPlayback();
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === "suspended") await audioCtx.resume();
+  setAudioSession("play-and-record");
   try {
-    stream = stream || await navigator.mediaDevices.getUserMedia({
+    stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) {
+    releaseMic();
     setState("ready", "Microphone blocked. Allow mic access for this site and try again.");
     return;
   }
+  micCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (micCtx.state === "suspended") await micCtx.resume();
   chunks = [];
   recorder = new MediaRecorder(stream);
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
@@ -154,8 +195,8 @@ async function startListening() {
 }
 
 function watchSilence() {
-  const source = audioCtx.createMediaStreamSource(stream);
-  const analyser = audioCtx.createAnalyser();
+  const source = micCtx.createMediaStreamSource(stream);
+  const analyser = micCtx.createAnalyser();
   analyser.fftSize = 1024;
   source.connect(analyser);
   const data = new Float32Array(analyser.fftSize);
@@ -184,6 +225,7 @@ async function onRecordingDone() {
   const heard = recorder.heard;
   const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
   recorder = null;
+  releaseMic();  // back to media audio: loudspeaker / Bluetooth music quality
   if (!heard) { setState("ready", "Didn't hear anything. Tap to try again."); return; }
   await sendTurn(blob);
 }
@@ -237,6 +279,7 @@ async function sendTurn(blob) {
 }
 
 $("mic").addEventListener("click", () => {
+  unlockPlayer();  // must happen inside the tap itself
   if (closed || offline) { reconnect(); return; }
   if (recorder && recorder.state === "recording") { recorder.stop(); return; }
   startListening();
@@ -334,19 +377,38 @@ async function poll() {
     renderLimits(s);
     pollSec = s.poll_sec || pollSec;
     offline = false;
+    if (s.start_url) { try { localStorage.setItem("pva_start_url", s.start_url); } catch (e) {} }
+    showStart(false);
     if (s.state === "closing" && !goodbyePlayed) {
       goodbyePlayed = true; closed = true;
       stopPlayback();
       if (recorder && recorder.state === "recording") { recorder.onstop = null; recorder.stop(); }
-      setState("ready", "Session closed, memory saved. Start it from Kaggle, then tap the mic to reconnect.");
+      releaseMic();
+      setState("ready", "Session closed, memory saved. Start it again, then tap the mic to reconnect.");
+      showStart(true);
       const g = await fetch("api/goodbye", { headers: HEADERS });
-      if (g.ok && audioCtx) enqueueAudio(await g.arrayBuffer(), turnId);
+      if (g.ok && playerUnlocked) enqueueAudio(await g.arrayBuffer(), turnId);
     }
   } catch (e) {
     if (closed) return;
     offline = true;
-    setState("ready", "Assistant is offline. Start it from Kaggle, then tap the mic to reconnect.");
+    setState("ready", "Jarvis is off. Start it, wait ~4 minutes, then tap the mic to connect.");
+    showStart(true);
   }
+}
+
+// "Start Jarvis" button (your GitHub Start Jarvis page), remembered from the last
+// time Jarvis was online, so it also works while Jarvis is off.
+function showStart(visible) {
+  let url = null;
+  try { url = localStorage.getItem("pva_start_url"); } catch (e) {}
+  const a = $("start");
+  a.hidden = !(visible && url && /^https:\/\//.test(url));
+  if (!a.hidden) a.href = url;
+}
+
+if ("serviceWorker" in navigator) {  // installable app + opens even while Jarvis is off
+  navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
 // Every status check is one request on the free ngrok plan (20,000/month). So: check

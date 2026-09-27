@@ -1,0 +1,35 @@
+# Every push that changes the assistant's code uploads it to Kaggle (new version of
+# the assistant-code dataset). The next "Start Jarvis" then runs the new code.
+name: Update code on Kaggle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "scripts/make_code_zip.py"
+      - "scripts/upload_code.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-code
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -q kaggle
+      - run: python scripts/upload_code.py
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          JARVIS_CODE: ${{ vars.JARVIS_CODE || 'assistant-code' }}
