@@ -1,0 +1,12 @@
+# Only for running the tests on your laptop (no GPU needed):
+#   python -m venv .venv
+#   .venv\Scripts\python -m pip install -r requirements-dev.txt
+#   .venv\Scripts\python -m pytest tests
+pytest
+numpy
+cryptography
+fastapi
+httpx
+requests
+tzdata
+soundfile

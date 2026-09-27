@@ -1,0 +1,400 @@
+"""The assistant's brain (one spoken turn at a time) and the web server for the page."""
+import base64
+import hashlib
+import hmac
+import json
+import queue
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import requests
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+
+import config
+import llm
+from budget import Budget, Meter, current_meters, minutes_until_stop
+from intents import parse_command
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+PHRASES = {
+    "en": {
+        "remembered": "Okay, I'll remember that.",
+        "forgot": "Done, I've forgotten that.",
+        "not_found": "I couldn't find that in my memory.",
+        "notice": "Heads up: {pct}% of {label} is used.",
+        "notice_left": " About {left} minutes left.",
+        "error": "Sorry, something went wrong. Please try again.",
+        "bye_idle": "No activity for a while, so I'm closing now. Your memory is saved. Goodbye!",
+        "bye_limit": "{label} is almost used up, so I'm stopping now to keep this free. "
+                     "Your memory is saved. Goodbye!",
+        "labels": {"day": "today's GPU time", "week": "this week's GPU time",
+                   "requests": "this month's free link requests",
+                   "data": "this month's free link data"},
+    },
+    "hi": {
+        "remembered": "ठीक है, मैं यह याद रखूँगा।",
+        "forgot": "हो गया, मैंने यह भुला दिया।",
+        "not_found": "यह मेरी मेमोरी में नहीं मिला।",
+        "notice": "ध्यान दें: {label} का {pct}% इस्तेमाल हो चुका है।",
+        "notice_left": " लगभग {left} मिनट बचे हैं।",
+        "error": "माफ़ कीजिए, कुछ गड़बड़ हो गई। फिर से कोशिश करें।",
+        "bye_idle": "काफ़ी देर से कोई बात नहीं हुई, इसलिए मैं बंद हो रहा हूँ। आपकी मेमोरी सेव है। अलविदा!",
+        "bye_limit": "{label} लगभग ख़त्म है, इसलिए इसे मुफ़्त रखने के लिए मैं अब बंद हो रहा हूँ। "
+                     "आपकी मेमोरी सेव है। अलविदा!",
+        "labels": {"day": "आज का GPU समय", "week": "इस हफ़्ते का GPU समय",
+                   "requests": "इस महीने की फ़्री लिंक रिक्वेस्ट",
+                   "data": "इस महीने का फ़्री लिंक डेटा"},
+    },
+}
+
+
+def notice_text(meter: Meter, lang: str) -> str:
+    p = PHRASES.get(lang, PHRASES["en"])
+    text = p["notice"].format(pct=meter.percent, label=p["labels"][meter.name])
+    left = minutes_until_stop(meter, config.STOP_AT)
+    return text + (p["notice_left"].format(left=left) if left is not None else "")
+
+
+def limit_goodbye(meter: Meter, lang: str) -> str:
+    p = PHRASES.get(lang, PHRASES["en"])
+    label = p["labels"][meter.name]
+    return p["bye_limit"].format(label=label[0].upper() + label[1:])
+
+
+def now_ist() -> datetime:
+    return datetime.now(ZoneInfo(config.TIMEZONE))
+
+
+def _line(**event) -> bytes:
+    return (json.dumps(event, ensure_ascii=False) + "\n").encode()
+
+
+class Assistant:
+    def __init__(self, stt, tts, memory, store, timer, restart_ollama=None, picker=None):
+        self.stt, self.tts, self.memory, self.store, self.timer = stt, tts, memory, store, timer
+        self.restart_ollama = restart_ollama
+        self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
+        self.budget = Budget(config.NOTIFY_AT, config.STOP_AT)
+        self.notices: queue.SimpleQueue = queue.SimpleQueue()  # 90 % warnings to speak
+        self.server = None  # uvicorn.Server, set by main.py
+        self.state = "ready"
+        self.last_lang = "en"
+        self.goodbye_audio: bytes | None = None
+        self.save_ok = True
+        self.turn_lock = threading.Lock()
+        self.save_lock = threading.Lock()
+        self.stopped = threading.Event()
+
+    # --- one spoken turn -------------------------------------------------------
+    def handle_turn(self, audio: bytes):
+        """Generator of NDJSON events: transcript, then sentence text + audio pairs."""
+        try:
+            text, lang = self.stt.transcribe(audio)
+            yield _line(type="transcript", text=text, lang=lang)
+            if not text:
+                yield _line(type="done", heard=False)
+                return
+            self.last_lang = lang
+            phrases = PHRASES.get(lang, PHRASES["en"])
+            now = now_ist()
+
+            turn_id = None
+            command = parse_command(text)
+            if command:
+                action, content = command
+                if action == "remember":
+                    self.memory.add_fact(content, now)
+                    reply_parts = [phrases["remembered"]]
+                else:
+                    fact, turns = self.memory.forget(content, config.FORGET_MIN_SIMILARITY)
+                    reply_parts = [phrases["forgot"] if (fact or turns) else phrases["not_found"]]
+                for sentence in reply_parts:
+                    yield from self._speak(sentence, lang)
+            else:
+                model = self.picker.pick()
+                reply_parts = []
+                for sentence in self._llm_sentences(text, lang, now, model):
+                    reply_parts.append(sentence)
+                    yield from self._speak(sentence, lang)
+                turn_id = self.memory.add_turn(text, " ".join(reply_parts), lang, now, model)
+
+            while not self.notices.empty():  # free-plan warnings, spoken once each
+                yield from self._speak(notice_text(self.notices.get(), lang), lang)
+            yield _line(type="done", heard=True, turn_id=turn_id)
+        except Exception as e:
+            print(f"[turn] error: {type(e).__name__}: {str(e)[:200]}")
+            yield from self._speak(PHRASES.get(self.last_lang, PHRASES["en"])["error"],
+                                   self.last_lang, ignore_errors=True)
+            yield _line(type="done", heard=True, error=True)
+        finally:
+            self.timer.touch(now_ist())
+
+    def _llm_sentences(self, text: str, lang: str, now: datetime, model: str):
+        history = self.memory.recent_turns(config.RECENT_TURNS)
+        related = self.memory.search(text, config.MEMORY_TOP_K, config.MEMORY_MIN_SIMILARITY,
+                                     exclude_recent_turns=config.RECENT_TURNS)
+        facts = self.memory.all_facts(config.ALL_FACTS_LIMIT)
+        messages = llm.build_messages(text, lang, facts, related, history, now)
+        chunker = llm.SentenceChunker()
+        for piece in llm.stream_reply(messages, model):
+            yield from chunker.feed(piece)
+        yield from chunker.flush()
+
+    def _speak(self, sentence: str, lang: str, ignore_errors: bool = False):
+        try:
+            wav = self.tts.synthesize(sentence, lang)
+        except Exception:
+            if not ignore_errors:
+                raise
+            wav = None
+        yield _line(type="sentence", text=sentence,
+                    audio=base64.b64encode(wav).decode() if wav else None)
+
+    # --- status, saving, closing ---------------------------------------------
+    def status(self) -> dict:
+        now = now_ist()
+        idle_left = max(0, config.IDLE_TIMEOUT_MIN * 60 - self.timer.idle_seconds(now))
+        last = self.store.last_saved
+        meters = current_meters(self.memory, now)
+        return {
+            "state": self.state,
+            "name": config.ASSISTANT_NAME,
+            "idle_left_sec": int(idle_left),
+            "last_saved": datetime.fromtimestamp(last, ZoneInfo(config.TIMEZONE)).strftime("%H:%M")
+                          if last else None,
+            "save_ok": self.save_ok,
+            "poll_sec": config.STATUS_POLL_SEC,
+            "meters": [{"name": m.name, "used": m.used, "limit": m.limit, "percent": m.percent}
+                       for m in meters],
+            "warnings": [notice_text(m, "en") for m in self.budget.warnings(meters)],
+            "notify_pct": round(config.NOTIFY_AT * 100),
+            "stop_pct": round(config.STOP_AT * 100),
+        }
+
+    def count_net(self, requests: int, nbytes: int) -> None:
+        """Track traffic through ngrok, to stay inside the free plan."""
+        self.memory.add_net(now_ist().strftime("%Y-%m"), requests, nbytes)
+
+    def save(self) -> bool:
+        with self.save_lock:
+            self.memory.dirty = False
+            try:
+                ok = self.store.save(self.memory.to_bytes())
+            except Exception as e:
+                print(f"[memory] save error: {type(e).__name__}: {str(e)[:200]}")
+                ok = False
+            if not ok:
+                self.memory.dirty = True
+            self.save_ok = ok
+            print(f"[memory] {'saved' if ok else 'SAVE FAILED (encrypted backup kept in output)'} "
+                  f"at {now_ist():%H:%M}")
+            return ok
+
+    def close(self, reason: str, meter: Meter | None = None) -> None:
+        """Say goodbye, save memory and stop the server (which ends the notebook).
+        reason is "idle" or "limit" (then `meter` is the limit that was reached)."""
+        got_lock = self.turn_lock.acquire(timeout=90)  # let a reply in progress finish
+        try:
+            if self.state == "closing":
+                return
+            self.state = "closing"
+        finally:
+            if got_lock:
+                self.turn_lock.release()
+        print(f"[session] closing: {reason}" + (f" ({meter.name} at {meter.percent}%)" if meter else ""))
+        if meter:
+            text = limit_goodbye(meter, self.last_lang)
+        else:
+            text = PHRASES.get(self.last_lang, PHRASES["en"])["bye_idle"]
+        self.memory.add_usage(*self.timer.tick(now_ist()))
+        try:
+            self.goodbye_audio = self.tts.synthesize(text, self.last_lang)
+        except Exception:
+            self.goodbye_audio = None
+        self.save()
+        time.sleep(config.GOODBYE_GRACE_SEC)  # the page polls, fetches and plays the goodbye
+        self.stopped.set()
+        if self.server is not None:
+            self.server.should_exit = True
+
+    def watchdog(self) -> None:
+        """Background loop: usage clock, idle/limit checks, autosave, Ollama health."""
+        last_save = time.time()
+        last_health = time.time()
+        while not self.stopped.is_set():
+            time.sleep(5)
+            now = now_ist()
+            self.memory.add_usage(*self.timer.tick(now))
+            if self.turn_lock.locked():
+                self.timer.touch(now)  # a long reply is not "idle"
+
+            meters = current_meters(self.memory, now)
+            for meter in self.budget.new_notices(meters):
+                print(f"[budget] {meter.name} at {meter.percent}% of the free limit")
+                self.notices.put(meter)
+            over = self.budget.over_stop(meters)
+            if over:
+                self.close("limit", over)  # blocks until the server is told to stop
+                return
+            if self.timer.idle_reached(now):
+                self.close("idle")
+                return
+            if time.time() - last_save >= config.AUTOSAVE_EVERY_MIN * 60 and self.memory.dirty:
+                last_save = time.time()
+                self.save()
+            if time.time() - last_health >= 30:
+                last_health = time.time()
+                self._check_ollama()
+
+    def _check_ollama(self) -> None:
+        try:
+            requests.get(f"{config.OLLAMA_URL}/api/version", timeout=5).raise_for_status()
+        except requests.RequestException:
+            print("[ollama] not responding, restarting")
+            if self.restart_ollama:
+                self.restart_ollama()
+
+
+# --- optional password login (only when Google sign-in via ngrok is off) --------
+class PasswordGate:
+    COOKIE = "pva_session"
+    MAX_FAILS = 5
+    LOCK_SEC = 15 * 60
+    VALID_DAYS = 30
+
+    def __init__(self, password: str, secret: bytes):
+        self.password = password
+        self.secret = hashlib.sha256(b"pva-login-cookie" + secret).digest()
+        self.fails = 0
+        self.locked_until = 0.0
+
+    def _sign(self, expires: int) -> str:
+        sig = hmac.new(self.secret, str(expires).encode(), hashlib.sha256).hexdigest()
+        return f"{expires}.{sig}"
+
+    def valid(self, token: str | None) -> bool:
+        try:
+            expires, _ = token.split(".", 1)
+            return int(expires) > time.time() and hmac.compare_digest(token, self._sign(int(expires)))
+        except (AttributeError, ValueError):
+            return False
+
+    def try_login(self, password: str) -> str | None:
+        if time.time() < self.locked_until:
+            return None
+        if hmac.compare_digest(password.encode(), self.password.encode()):
+            self.fails = 0
+            return self._sign(int(time.time()) + self.VALID_DAYS * 86400)
+        self.fails += 1
+        if self.fails >= self.MAX_FAILS:
+            self.fails = 0
+            self.locked_until = time.time() + self.LOCK_SEC
+        return None
+
+
+def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAPI:
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    open_paths = {"/login", "/manifest.json"}
+
+    @app.middleware("http")
+    async def security(request: Request, call_next):
+        if gate and request.url.path not in open_paths and not gate.valid(request.cookies.get(gate.COOKIE)):
+            if request.url.path.startswith("/api/"):
+                return JSONResponse({"error": "login required"}, status_code=401)
+            return FileResponse(STATIC_DIR / "login.html")
+        response = await call_next(request)
+        # Streamed replies are counted inside /api/turn; everything else here.
+        assistant.count_net(1, int(response.headers.get("content-length", 0)))
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.get("/")
+    def index():
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/manifest.json")
+    def manifest():
+        return FileResponse(STATIC_DIR / "manifest.json")
+
+    @app.post("/login")
+    async def login(request: Request):
+        form = await request.json()
+        token = gate.try_login(str(form.get("password", ""))) if gate else None
+        if not token:
+            return JSONResponse({"ok": False}, status_code=401)
+        response = JSONResponse({"ok": True})
+        response.set_cookie(gate.COOKIE, token, max_age=gate.VALID_DAYS * 86400,
+                            httponly=True, secure=True, samesite="strict")
+        return response
+
+    @app.get("/api/status")
+    def status():
+        return assistant.status()
+
+    @app.post("/api/ping")
+    def ping():
+        """The page was opened or the mic was tapped: counts as activity."""
+        if assistant.state != "closing":
+            assistant.timer.touch(now_ist())
+        return {"ok": True}
+
+    @app.post("/api/turn")
+    async def turn(request: Request):
+        audio = await request.body()
+        if assistant.state == "closing":
+            return JSONResponse({"error": "closing"}, status_code=409)
+        if not audio or len(audio) > 10_000_000:
+            return JSONResponse({"error": "bad audio"}, status_code=400)
+        if not assistant.turn_lock.acquire(blocking=False):
+            return JSONResponse({"error": "busy"}, status_code=409)
+
+        # The turn runs in its own thread, so it always finishes (and saves the
+        # turn and frees the lock) even if the phone disconnects midway.
+        events: queue.Queue = queue.Queue()
+
+        def worker():
+            try:
+                for event in assistant.handle_turn(audio):
+                    events.put(event)
+            finally:
+                events.put(None)
+                assistant.turn_lock.release()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        def stream():
+            sent = 0
+            try:
+                while (event := events.get()) is not None:
+                    sent += len(event)
+                    yield event
+            finally:
+                assistant.count_net(0, sent)
+
+        return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+    @app.post("/api/rate")
+    async def rate(request: Request):
+        """👍/👎 on a reply. 👍 replies become fine-tuning data (Phase 5)."""
+        body = await request.json()
+        try:
+            ok = assistant.memory.rate_turn(int(body["turn_id"]), int(body["value"]))
+        except (KeyError, TypeError, ValueError):
+            return JSONResponse({"error": "bad rating"}, status_code=400)
+        return {"ok": ok}
+
+    @app.get("/api/goodbye")
+    def goodbye():
+        audio = assistant.goodbye_audio
+        if not audio:
+            return Response(status_code=404)
+        return Response(audio, media_type="audio/wav" if audio[:4] == b"RIFF" else "audio/mpeg")
+
+    return app

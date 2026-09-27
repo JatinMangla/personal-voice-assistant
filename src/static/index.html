@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="manifest.json">
+<title>Jarvis</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #16181d; --muted: #6b7280; --card: #ffffff;
+    --accent: #2563eb; --listen: #dc2626; --think: #d97706; --speak: #059669;
+    --border: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --fg: #eceef2; --muted: #9aa1ad; --card: #181b21;
+            --border: #262a33; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Devanagari", sans-serif; }
+  main { max-width: 560px; margin: 0 auto; min-height: 100%; display: flex; flex-direction: column;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+  header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  .meta { color: var(--muted); font-size: 13px; text-align: right; }
+  .meta .bad { color: var(--listen); }
+  .limits { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 14px; margin-top: 12px;
+    font-size: 12px; color: var(--muted); }
+  @media (min-width: 480px) { .limits { grid-template-columns: repeat(4, 1fr); } }
+  .limit .bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 3px; }
+  .limit .bar i { display: block; height: 100%; background: var(--accent); }
+  .limit.warn { color: var(--listen); font-weight: 600; }
+  .limit.warn .bar i { background: var(--listen); }
+  #warn { display: none; margin-top: 10px; padding: 8px 12px; border-radius: 10px; font-size: 14px;
+    background: rgba(220, 38, 38, .12); color: var(--listen); }
+  #log { flex: 1; overflow-y: auto; margin: 16px 0; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 10px 14px; border-radius: 14px; max-width: 88%; white-space: pre-wrap;
+    overflow-wrap: anywhere; }
+  .you { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+  .bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border);
+    border-bottom-left-radius: 4px; }
+  .hint { color: var(--muted); text-align: center; font-size: 14px; margin: auto 0; }
+  .rate { align-self: flex-start; display: flex; gap: 6px; margin-top: -4px; }
+  .rate button { font-size: 15px; line-height: 1; padding: 6px 10px; border-radius: 999px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); opacity: .6; }
+  .rate button.on { opacity: 1; border-color: var(--accent); background: var(--card); }
+  .controls { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #mic { width: 96px; height: 96px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--accent); color: #fff; display: grid; place-items: center;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); transition: transform .1s, background .2s; }
+  #mic:active { transform: scale(.96); }
+  #mic:disabled { opacity: .45; cursor: default; }
+  #mic svg { width: 40px; height: 40px; }
+  body[data-state="listening"] #mic { background: var(--listen); animation: pulse 1.2s infinite; }
+  body[data-state="thinking"] #mic { background: var(--think); }
+  body[data-state="speaking"] #mic { background: var(--speak); }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,.45); }
+                     50% { box-shadow: 0 0 0 16px rgba(220,38,38,0); } }
+  @media (prefers-reduced-motion: reduce) { body[data-state="listening"] #mic { animation: none; } }
+  #status { font-size: 15px; color: var(--muted); min-height: 1.4em; text-align: center; }
+</style>
+</head>
+<body data-state="ready">
+<main>
+  <header>
+    <h1 id="name">Jarvis</h1>
+    <div class="meta"><div id="saved">not saved yet</div></div>
+  </header>
+  <div class="limits" id="limits" title="Free limits: a warning at 90%, automatic stop at 99%, so it never costs anything"></div>
+  <div id="warn" role="alert"></div>
+  <div id="log" aria-live="polite"><p class="hint" id="hint">Tap the mic and speak. It stops listening when you pause.</p></div>
+  <div class="controls">
+    <button id="mic" aria-label="Tap to talk">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+    </button>
+    <div id="status">Tap to talk</div>
+  </div>
+</main>
+<script>
+const HEADERS = { "ngrok-skip-browser-warning": "1" };
+const $ = (id) => document.getElementById(id);
+let audioCtx = null, stream = null, recorder = null, chunks = [];
+let playQueue = Promise.resolve(), currentSource = null, turnId = 0, closed = false;
+
+function setState(state, text) {
+  document.body.dataset.state = state;
+  $("status").textContent = text;
+}
+
+function addMsg(who, text) {
+  $("hint")?.remove();
+  const div = document.createElement("div");
+  div.className = "msg " + who;
+  div.textContent = text;
+  $("log").appendChild(div);
+  $("log").scrollTop = $("log").scrollHeight;
+  return div;
+}
+
+function ping() { fetch("api/ping", { method: "POST", headers: HEADERS }).catch(() => {}); }
+
+// ---------- playback: sentences play one after another ----------
+function stopPlayback() {
+  turnId++;
+  playQueue = Promise.resolve();
+  if (currentSource) { try { currentSource.stop(); } catch (e) {} currentSource = null; }
+}
+
+function enqueueAudio(b64OrBuffer, myTurn) {
+  playQueue = playQueue.then(async () => {
+    if (myTurn !== turnId || !b64OrBuffer) return;
+    const bytes = typeof b64OrBuffer === "string"
+      ? Uint8Array.from(atob(b64OrBuffer), c => c.charCodeAt(0)).buffer : b64OrBuffer;
+    const buffer = await audioCtx.decodeAudioData(bytes);
+    if (myTurn !== turnId) return;
+    setState("speaking", "Speaking… tap to interrupt");
+    await new Promise((resolve) => {
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(audioCtx.destination);
+      src.onended = resolve;
+      currentSource = src;
+      src.start();
+    });
+  }).catch(() => {});
+  return playQueue;
+}
+
+// ---------- recording with automatic stop on silence ----------
+async function startListening() {
+  stopPlayback();
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") await audioCtx.resume();
+  try {
+    stream = stream || await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) {
+    setState("ready", "Microphone blocked. Allow mic access for this site and try again.");
+    return;
+  }
+  chunks = [];
+  recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  recorder.onstop = onRecordingDone;
+  recorder.start(250);
+  setState("listening", "Listening… (tap to stop)");
+  watchSilence();
+}
+
+function watchSilence() {
+  const source = audioCtx.createMediaStreamSource(stream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  const started = performance.now();
+  let noise = 0.01, speechMs = 0, silenceMs = 0, last = started;
+  recorder.heard = false;
+
+  const timer = setInterval(() => {
+    if (!recorder || recorder.state !== "recording") { clearInterval(timer); source.disconnect(); return; }
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0; for (const v of data) sum += v * v;
+    const rms = Math.sqrt(sum / data.length);
+    const now = performance.now(), dt = now - last; last = now;
+    const elapsed = now - started;
+    if (elapsed < 300) { noise = Math.max(noise, rms); return; }   // learn background noise
+    const loud = rms > Math.max(0.015, noise * 2.5);
+    if (loud) { speechMs += dt; silenceMs = 0; } else { silenceMs += dt; }
+    if (speechMs > 250) recorder.heard = true;
+    if ((recorder.heard && silenceMs > 1200) || (!recorder.heard && elapsed > 7000) || elapsed > 30000) {
+      recorder.stop();
+    }
+  }, 50);
+}
+
+async function onRecordingDone() {
+  const heard = recorder.heard;
+  const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+  recorder = null;
+  if (!heard) { setState("ready", "Didn't hear anything. Tap to try again."); return; }
+  await sendTurn(blob);
+}
+
+// ---------- send audio, read streamed reply ----------
+async function sendTurn(blob) {
+  const myTurn = ++turnId;
+  setState("thinking", "Thinking…");
+  let youMsg = null, botMsg = null;
+  try {
+    const res = await fetch("api/turn", { method: "POST", body: blob,
+      headers: { ...HEADERS, "Content-Type": blob.type } });
+    if (res.status === 409) { setState("ready", "Busy or closing. Try again in a moment."); return; }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "transcript") {
+          if (ev.text) youMsg = addMsg("you", ev.text);
+        } else if (ev.type === "sentence") {
+          if (!botMsg) botMsg = addMsg("bot", ev.text);
+          else botMsg.textContent += " " + ev.text;
+          $("log").scrollTop = $("log").scrollHeight;
+          enqueueAudio(ev.audio, myTurn);
+        } else if (ev.type === "done" && !ev.heard) {
+          setState("ready", "Didn't catch that. Tap to try again.");
+          return;
+        } else if (ev.type === "done" && ev.turn_id) {
+          addRating(ev.turn_id);
+        }
+      }
+    }
+    await playQueue;
+    if (myTurn === turnId) setState("ready", "Tap to talk");
+  } catch (e) {
+    if (myTurn === turnId) setState("ready", "Connection problem. Tap to try again.");
+  }
+}
+
+$("mic").addEventListener("click", () => {
+  if (closed || offline) { reconnect(); return; }
+  if (recorder && recorder.state === "recording") { recorder.stop(); return; }
+  startListening();
+});
+
+// ---------- 👍 / 👎 on each reply: 👍 replies teach the assistant your style later ----------
+function addRating(turnId) {
+  const row = document.createElement("div");
+  row.className = "rate";
+  for (const [value, label, name] of [[1, "👍", "Good reply"], [-1, "👎", "Bad reply"]]) {
+    const b = document.createElement("button");
+    b.textContent = label; b.setAttribute("aria-label", name);
+    b.addEventListener("click", async () => {
+      const current = row.dataset.value === String(value) ? 0 : value;  // tap again to undo
+      const r = await fetch("api/rate", { method: "POST",
+        headers: { ...HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify({ turn_id: turnId, value: current }) }).catch(() => null);
+      if (r && r.ok) {
+        row.dataset.value = String(current);
+        row.querySelectorAll("button").forEach((x) => x.classList.remove("on"));
+        if (current) b.classList.add("on");
+      }
+    });
+    row.appendChild(b);
+  }
+  $("log").appendChild(row);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+// ---------- free limits: bars, and a red banner from 90 % ----------
+const LIMIT_LABELS = { day: "GPU today", week: "GPU last 7 days",
+                       requests: "Link requests (month)", data: "Link data (month)" };
+function limitText(m) {
+  if (m.name === "day") return `${Math.round(m.used / 60)} / ${Math.round(m.limit / 60)} min`;
+  if (m.name === "week") return `${(m.used / 3600).toFixed(1)} / ${Math.round(m.limit / 3600)} h`;
+  if (m.name === "data") return `${Math.round(m.used / 1e6)} / ${Math.round(m.limit / 1e6)} MB`;
+  return `${m.used.toLocaleString()} / ${m.limit.toLocaleString()}`;
+}
+function renderLimits(s) {
+  const box = $("limits");
+  box.replaceChildren(...s.meters.map((m) => {
+    const div = document.createElement("div");
+    div.className = "limit" + (m.percent >= s.notify_pct ? " warn" : "");
+    div.textContent = `${LIMIT_LABELS[m.name]}: ${limitText(m)}`;
+    const bar = document.createElement("div"); bar.className = "bar";
+    const fill = document.createElement("i"); fill.style.width = Math.min(100, m.percent) + "%";
+    bar.appendChild(fill); div.appendChild(bar);
+    return div;
+  }));
+  const warn = $("warn");
+  warn.style.display = s.warnings.length ? "block" : "none";
+  warn.textContent = s.warnings.length
+    ? s.warnings.join(" ") + ` It stops automatically at ${s.stop_pct}% so this stays free.` : "";
+}
+
+// ---------- status polling, goodbye ----------
+let goodbyePlayed = false;
+async function poll() {
+  try {
+    const r = await fetch("api/status", { headers: HEADERS });
+    if (!r.ok) throw new Error();
+    const s = await r.json();
+    $("name").textContent = s.name;
+    document.title = s.name;
+    const saved = $("saved");
+    saved.textContent = s.last_saved ? `saved ${s.last_saved}` : "not saved yet";
+    saved.className = s.save_ok ? "" : "bad";
+    if (!s.save_ok) saved.textContent += " (last save failed)";
+    renderLimits(s);
+    pollSec = s.poll_sec || pollSec;
+    offline = false;
+    if (s.state === "closing" && !goodbyePlayed) {
+      goodbyePlayed = true; closed = true;
+      stopPlayback();
+      if (recorder && recorder.state === "recording") { recorder.onstop = null; recorder.stop(); }
+      setState("ready", "Session closed, memory saved. Start it from Kaggle, then tap the mic to reconnect.");
+      const g = await fetch("api/goodbye", { headers: HEADERS });
+      if (g.ok && audioCtx) enqueueAudio(await g.arrayBuffer(), turnId);
+    }
+  } catch (e) {
+    if (closed) return;
+    offline = true;
+    setState("ready", "Assistant is offline. Start it from Kaggle, then tap the mic to reconnect.");
+  }
+}
+
+// Every status check is one request on the free ngrok plan (20,000/month). So: check
+// every 60 s only while connected and the page is visible, and never while offline
+// (a page left open all day would otherwise use up the month's requests).
+let offline = false, pollSec = 60;
+function schedulePoll() {
+  setTimeout(async () => {
+    if (closed || offline) return;
+    if (!document.hidden) await poll();
+    if (!closed && !offline) schedulePoll();
+  }, pollSec * 1000);
+}
+
+async function reconnect() {
+  closed = false; goodbyePlayed = false;
+  setState("thinking", "Connecting…");
+  await poll();
+  if (!offline) { setState("ready", "Tap to talk"); ping(); schedulePoll(); }
+}
+reconnect();
+</script>
+</body>
+</html>
