@@ -3,7 +3,8 @@
 After each turn, the LLM reads what YOU said and writes down facts that will still be
 true in months: allergies, diet, health, family, likes, work... Health and diet facts
 are then always in front of the assistant, so e.g. a recipe that contains something
-you're allergic to gets a warning, even months later.
+you're allergic to gets a warning, even months later. Your corrections of the assistant
+("you can't work without internet") are kept the same way and always followed.
 
 Guards: only your own words are used (never the assistant's or web text); anything
 that looks private (PINs, OTPs, card/phone numbers, passwords, emails) is dropped;
@@ -19,23 +20,31 @@ import requests
 import config
 from finetune_data import looks_private
 
-CATEGORIES = ["health", "diet", "person", "place", "work", "preference", "routine", "other"]
+CATEGORIES = ["health", "diet", "person", "place", "work", "preference", "routine",
+              "assistant", "other"]
 
-_FIRST_PERSON = re.compile(
-    r"\b(i|i'm|im|i've|i'd|i'll|my|me|mine|we|our|us)\b"
-    r"|मैं|मेरा|मेरी|मेरे|मुझे|मुझको|हम|हमारा|हमारी|हमें"
-    r"|\b(main|mera|meri|mere|mujhe|hum|hamara|hamari|hume)\b",
+# Worth an extra LLM call only if the user talked about themselves ("I", "my") or
+# told the assistant something about itself ("you", "your") - e.g. a correction.
+_PERSONAL = re.compile(
+    r"\b(i|i'm|im|i've|i'd|i'll|my|me|mine|we|our|us|you|you're|your|yours)\b"
+    r"|मैं|मेरा|मेरी|मेरे|मुझे|मुझको|हम|हमारा|हमारी|हमें|तुम|तुम्हें|तुम्हारा|आप|आपको|आपका"
+    r"|\b(main|mera|meri|mere|mujhe|hum|hamara|hamari|hume|tum|tumhe|tumhara|aap|aapko|aapka)\b",
     re.IGNORECASE,
 )
 
-EXTRACT_PROMPT = """You keep a list of lasting facts about the user of a personal assistant.
+EXTRACT_PROMPT = """You keep a list of lasting facts for a personal voice assistant.
 From the user's message, extract facts that will most likely still be true in months:
 health (allergies, conditions, medicines), diet (vegetarian, foods they avoid), family and
 people, home and places, work and study, likes and dislikes, routines and goals.
 
+Also, when the user corrects the assistant or tells it how it works or how it should behave
+(for example "you can't talk to me without internet", "don't call me sir", "keep answers
+short"), save that with category "assistant", written as a fact or instruction about the
+assistant. Example: "The assistant needs internet; it cannot work offline."
+
 Rules:
-- Only what the user clearly says about themselves or their family. No questions, guesses,
-  or temporary things (today's mood, what they are doing right now).
+- Only what the user clearly says. No questions, guesses, or temporary things (today's
+  mood, what they are doing right now). Ignore what the assistant said.
 - Write each fact in short English, third person. Example: "User is allergic to peanuts."
 - Never include passwords, PINs, OTPs, card, bank or phone numbers, or exact addresses.
 - If a fact changes a known fact, set "replaces" to that known fact's number; otherwise 0.
@@ -63,7 +72,7 @@ SCHEMA = {
 
 def worth_checking(user_text: str) -> bool:
     """Skip the extra LLM call unless the user talked about themselves."""
-    return len(user_text.split()) >= 3 and bool(_FIRST_PERSON.search(user_text))
+    return len(user_text.split()) >= 3 and bool(_PERSONAL.search(user_text))
 
 
 def _ask_llm(user_text: str, known: list[str]) -> list[dict]:

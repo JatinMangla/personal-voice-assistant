@@ -19,11 +19,30 @@ T0 = datetime(2026, 9, 28, 10, 0, tzinfo=IST)
     ("my daughter loves dancing", True),
     ("मुझे मूंगफली से एलर्जी है", True),
     ("mujhe peanuts se allergy hai", True),
+    ("you can't talk to me without internet", True),       # a correction
+    ("आप बिना इंटरनेट के बात नहीं कर सकते", True),
     ("what is the weather", False),
     ("hello", False),
 ])
 def test_worth_checking(text, check):
     assert learn.worth_checking(text) is check
+
+
+def test_correction_about_the_assistant_is_kept_and_always_shown(embedder, monkeypatch):
+    m = Memory(embedder)
+    fake_llm(monkeypatch, [{"fact": "The assistant needs internet; it cannot work offline.",
+                            "category": "assistant", "replaces": 0}])
+    assert learn.learn(m, "no, you can't talk to me without internet", T0)
+    facts = m.facts_for_prompt("tell me a joke", limit=1,
+                               always_categories=("health", "diet", "assistant"))
+    assert facts == ["The assistant needs internet; it cannot work offline."]
+
+
+def test_assistant_knows_it_needs_internet():
+    from llm import system_prompt
+    prompt = system_prompt("en", [], [], T0)
+    assert "no offline mode" in prompt and "cloud GPU" in prompt
+    assert "say so honestly instead of guessing" in prompt
 
 
 def fake_llm(monkeypatch, facts):

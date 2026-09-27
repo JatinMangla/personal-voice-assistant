@@ -23,8 +23,10 @@ def system_prompt(lang: str, facts: list[str], related: list[str], now: datetime
         "user asks for more. No markdown, lists, emojis, or code.",
         LANGUAGE_RULE.get(lang, LANGUAGE_RULE["en"]),
         f"Current date and time in India: {now.strftime('%A, %d %B %Y, %I:%M %p')}.",
-        "You cannot control devices or look things up online unless a tool is available. "
-        "Never pretend you did something.",
+        config.ABOUT_ASSISTANT,
+        "Never pretend you did something. If you are not sure about something, including "
+        "about yourself, say so honestly instead of guessing. When the user corrects you, "
+        "accept the correction.",
     ]
     if "web_search" in tools.REGISTRY:
         parts.append("You can search the internet with the web_search tool. Use it for "
@@ -35,10 +37,11 @@ def system_prompt(lang: str, facts: list[str], related: list[str], now: datetime
                      "out web addresses.")
     if facts:
         parts.append(
-            "What you know about the user. Apply it on your own, without being asked: for "
-            "example, if a recipe, dish or product contains something the user is allergic "
-            "to or avoids, clearly warn them and suggest a substitute; respect their diet, "
-            "health and preferences in every answer.\n" + "\n".join(f"- {f}" for f in facts))
+            "What you know about the user, and the user's corrections about you. Apply it on "
+            "your own, without being asked: for example, if a recipe, dish or product "
+            "contains something the user is allergic to or avoids, clearly warn them and "
+            "suggest a substitute; respect their diet, health and preferences in every "
+            "answer; always follow their corrections.\n" + "\n".join(f"- {f}" for f in facts))
     if related:
         parts.append("Possibly related past conversations (use only if relevant):\n"
                      + "\n".join(f"- {r}" for r in related))

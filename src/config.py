@@ -4,6 +4,18 @@ from pathlib import Path
 
 # --- Assistant personality ---------------------------------------------------
 ASSISTANT_NAME = "Jarvis"
+# True facts about how the assistant works, so it never guesses about itself.
+# Update this if you move Jarvis to your own PC (then it can work on home Wi-Fi only).
+ABOUT_ASSISTANT = (
+    "How you work (true facts; never claim otherwise): You run on a cloud GPU server "
+    "(Kaggle), not on the user's phone or laptop. The user's device talks to you over the "
+    "internet through a private, secured link, so it needs Wi-Fi or mobile data; without "
+    "internet you cannot hear or answer, and there is no offline mode. You run only after the "
+    "user starts you, and you switch off after 10 minutes without use. You remember things "
+    "between sessions in encrypted memory. You can search the internet only when a search "
+    "tool is available. You cannot make calls, send messages, set alarms or reminders, or "
+    "control devices unless a tool for it is available."
+)
 TIMEZONE = "Asia/Kolkata"
 
 # --- Models ------------------------------------------------------------------
@@ -58,7 +70,8 @@ RECENT_TURNS = 6              # last N turns of this session sent as chat histor
 FORGET_MIN_SIMILARITY = 0.85
 # Learning facts from normal conversation (learn.py)
 LEARN_FROM_CHAT = True
-ALWAYS_SHOWN_CATEGORIES = ("health", "diet")  # e.g. allergies: in every prompt
+# In every prompt: allergies/diet, and your corrections of the assistant ("assistant").
+ALWAYS_SHOWN_CATEGORIES = ("health", "diet", "assistant")
 LEARN_KNOWN_FACTS = 5                # similar known facts shown, so changes replace them
 LEARN_DUPLICATE_SIMILARITY = 0.93    # at or above this, a new fact counts as known
 DELETE_OLD_DATASET_VERSIONS = True  # so "forget" also removes old copies
