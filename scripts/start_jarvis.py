@@ -30,8 +30,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def settings() -> dict:
     user = os.environ.get("KAGGLE_USERNAME", "").strip()
-    if not user:
-        sys.exit("Set KAGGLE_USERNAME (and KAGGLE_API_TOKEN).")
+    if not user or not (os.environ.get("KAGGLE_API_TOKEN") or os.environ.get("KAGGLE_KEY")):
+        sys.exit("KAGGLE_USERNAME or KAGGLE_API_TOKEN is empty.\n"
+                 "On GitHub: repo -> Settings -> Secrets and variables -> Actions -> 'Secrets' "
+                 "tab -> 'New repository secret' (not Codespaces/Dependabot/Environment). Add "
+                 "KAGGLE_USERNAME and KAGGLE_API_TOKEN, then re-run.")
     extra = [s.strip() for s in os.environ.get("JARVIS_EXTRA", "").split(",") if s.strip()]
     return {
         "user": user,

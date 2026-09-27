@@ -11,6 +11,7 @@ spec.loader.exec_module(start_jarvis)
 
 def test_metadata_runs_private_with_gpu_internet_and_inputs(monkeypatch):
     monkeypatch.setenv("KAGGLE_USERNAME", "jatinmangla123")
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "KGAT_x")
     monkeypatch.delenv("JARVIS_NOTEBOOK", raising=False)
     monkeypatch.setenv("JARVIS_EXTRA", "jarvis-finetune")
     meta = start_jarvis.kernel_metadata(start_jarvis.settings())
@@ -26,6 +27,15 @@ def test_metadata_runs_private_with_gpu_internet_and_inputs(monkeypatch):
 def test_missing_username_stops(monkeypatch):
     monkeypatch.delenv("KAGGLE_USERNAME", raising=False)
     with pytest.raises(SystemExit):
+        start_jarvis.settings()
+
+
+def test_missing_token_stops_with_help(monkeypatch):
+    # What GitHub does when the repository secret isn't set: an empty value.
+    monkeypatch.setenv("KAGGLE_USERNAME", "jatinmangla123")
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "")
+    monkeypatch.delenv("KAGGLE_KEY", raising=False)
+    with pytest.raises(SystemExit, match="New repository secret"):
         start_jarvis.settings()
 
 
