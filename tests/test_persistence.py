@@ -27,6 +27,20 @@ def no_backup(monkeypatch, tmp_path):
     monkeypatch.setattr("time.sleep", lambda s: None)
 
 
+def test_kaggle_credentials_new_token_and_legacy_key(monkeypatch):
+    for name in ("KAGGLE_USERNAME", "KAGGLE_API_TOKEN", "KAGGLE_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KAGGLE_USERNAME", "raj")
+    with pytest.raises(RuntimeError, match="KAGGLE_API_TOKEN"):
+        config.kaggle_credentials()
+    monkeypatch.setenv("KAGGLE_API_TOKEN", " KGAT_abc ")
+    assert config.kaggle_credentials() == ("raj", {"KAGGLE_USERNAME": "raj",
+                                                   "KAGGLE_API_TOKEN": "KGAT_abc"})
+    monkeypatch.delenv("KAGGLE_API_TOKEN")
+    monkeypatch.setenv("KAGGLE_KEY", "legacy")
+    assert config.kaggle_credentials()[1]["KAGGLE_KEY"] == "legacy"
+
+
 def test_first_run_returns_none():
     store, calls = MemoryStore("me", KEY, {}), []
     fake_kaggle(store, [(1, "404 - Not Found")], calls)

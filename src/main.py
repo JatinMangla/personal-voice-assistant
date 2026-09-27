@@ -21,8 +21,7 @@ def run() -> None:
 
     # --- secrets (never printed) ---------------------------------------------
     key = crypto.load_key(config.get_secret("MEMORY_KEY"))
-    username = config.get_secret("KAGGLE_USERNAME")
-    kaggle_env = {"KAGGLE_USERNAME": username, "KAGGLE_KEY": config.get_secret("KAGGLE_KEY")}
+    username, kaggle_env = config.kaggle_credentials()
     ngrok_token = config.get_secret("NGROK_AUTHTOKEN")
     ngrok_domain = config.get_secret("NGROK_DOMAIN")
     allowed = config.get_secret("ALLOWED_EMAIL", required=False)

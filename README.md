@@ -54,12 +54,13 @@ How the ngrok usage stays low:
 1. Sign up at <https://www.kaggle.com> (Google sign-in is fine).
 2. **Settings → Phone verification**: verify your number. This is required for GPU and internet.
 3. **Turn on 2-step verification** for your Google account (<https://myaccount.google.com/security>) and on Kaggle if offered. This matters most: your account protects everything else.
-4. **Settings → API → Create New Token**. This downloads `kaggle.json`. Open it; you need `username` and `key`.
+4. **Settings → API → Generate New Token**. Kaggle shows a token (one long text, often starting `KGAT_`). **Copy it right away**: it is shown only once. No file is downloaded; that's normal with Kaggle's new tokens.
+5. Note your **username**: it's in your profile address, `kaggle.com/<username>`.
 
 ### 2. ngrok account (gives you the fixed private link)
 1. Sign up at <https://ngrok.com> with the **same Google account** you'll use to open the assistant.
 2. Dashboard → **Your Authtoken**: copy it.
-3. Dashboard → **Domains**: copy your free domain (looks like `something.ngrok-free.app`).
+3. Dashboard → **Domains**: copy your free domain (looks like `something.ngrok-free.app` or `something.ngrok-free.dev`). Every free account gets one; if you already have one, use it. Don't run another ngrok program with the same domain while the assistant is on.
 
 ### 3. Create your memory key (on this laptop)
 ```
@@ -87,8 +88,8 @@ Copy the printed key. **Save it in your password manager.** If you lose it, the 
 
 | Secret | Value |
 |---|---|
-| `KAGGLE_USERNAME` | `username` from kaggle.json |
-| `KAGGLE_KEY` | `key` from kaggle.json |
+| `KAGGLE_USERNAME` | your Kaggle username |
+| `KAGGLE_API_TOKEN` | the token from step 1.4 (if you have an old-style `kaggle.json` instead, add `KAGGLE_KEY` with its `key` value) |
 | `NGROK_AUTHTOKEN` | from step 2 |
 | `NGROK_DOMAIN` | from step 2, e.g. `something.ngrok-free.app` |
 | `ALLOWED_EMAIL` | your Gmail address (comma-separate if you ever add more) |
@@ -182,7 +183,7 @@ Fine-tuning shapes *how* Jarvis talks: tone, length, Hinglish style. Your facts 
 
 1. Keep tapping 👍 on replies you like, over a few weeks.
 2. Kaggle → **Create → New Notebook → File → Import Notebook** → `notebooks/finetune.ipynb`.
-3. **Settings:** GPU T4 x2, Internet On, Private. **Add Input:** `assistant-code`. **Secrets:** tick `KAGGLE_USERNAME`, `KAGGLE_KEY`, `MEMORY_KEY`.
+3. **Settings:** GPU T4 x2, Internet On, Private. **Add Input:** `assistant-code`. **Secrets:** tick `KAGGLE_USERNAME`, `KAGGLE_API_TOKEN`, `MEMORY_KEY`.
 4. **Save Version → Save & Run All.** It takes about 45–90 minutes. Don't run the assistant at the same time.
    - If there aren't 500 usable 👍 replies yet, or not enough free GPU time, it stops at once and tells you why.
    - Training stops early rather than pass the 99% free limit, and its GPU time is added to your counters.

@@ -83,6 +83,24 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 MODELS_MARKER = "PVA_MODELS_CACHE.json"
 
 
+def kaggle_credentials() -> tuple[str, dict[str, str]]:
+    """(username, env for the kaggle CLI). Works with the new API token
+    (KAGGLE_API_TOKEN, one string copied from Kaggle settings) or the legacy
+    kaggle.json values (KAGGLE_KEY)."""
+    username = get_secret("KAGGLE_USERNAME")
+    env = {"KAGGLE_USERNAME": username}
+    token = get_secret("KAGGLE_API_TOKEN", required=False)
+    key = get_secret("KAGGLE_KEY", required=False)
+    if token:
+        env["KAGGLE_API_TOKEN"] = token.strip()
+    elif key:
+        env["KAGGLE_KEY"] = key.strip()
+    else:
+        raise RuntimeError("Missing secret 'KAGGLE_API_TOKEN' (your Kaggle API token). "
+                           "Add it in Kaggle: Add-ons -> Secrets.")
+    return username.strip(), env
+
+
 def get_secret(name: str, required: bool = True) -> str | None:
     """Read a Kaggle Secret (or an environment variable when running locally)."""
     value = os.environ.get(name)

@@ -44,7 +44,8 @@ def find_input(marker: str) -> Path | None:
 def install_basics() -> None:
     """Just what the free-limit check needs (usually already on Kaggle: seconds)."""
     config.WORK_DIR.mkdir(parents=True, exist_ok=True)
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "kaggle", "cryptography"],
+    # -U: the new-style Kaggle API token needs a recent kaggle CLI
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "kaggle", "cryptography"],
                    check=True)
 
 
