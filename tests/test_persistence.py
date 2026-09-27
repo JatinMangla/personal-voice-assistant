@@ -17,7 +17,8 @@ def fake_kaggle(store, responses, calls, remote_blob=None):
         if args[1] == "download" and remote_blob is not None:
             (Path(args[args.index("-p") + 1]) / config.MEMORY_FILE_NAME).write_bytes(remote_blob)
         code, out = responses.pop(0)
-        return subprocess.CompletedProcess(args, code, stdout="", stderr=out)
+        return subprocess.CompletedProcess(args, code, stdout=out if code == 0 else "",
+                                           stderr=out if code else "")
     store._kaggle = run
 
 
@@ -48,9 +49,33 @@ def test_first_run_returns_none():
     assert not store.exists
 
 
+def test_first_run_kaggle_403_for_missing_private_dataset():
+    # Real Kaggle behaviour: 403 for a private dataset that doesn't exist yet.
+    store, calls = MemoryStore("me", KEY, {}), []
+    fake_kaggle(store, [(1, "403 Client Error: Forbidden"),
+                        (0, "ref,title,size\nme/other-data,Other,1KB")], calls)
+    assert store.load() is None
+    assert calls[1][:2] == ("datasets", "list")
+
+
+def test_existing_memory_but_download_fails_refuses_to_start_empty():
+    store, calls = MemoryStore("me", KEY, {}), []
+    fake_kaggle(store, [(1, "403 Client Error: Forbidden"),
+                        (0, "ref,title,size\nme/assistant-memory,assistant-memory,1KB")], calls)
+    with pytest.raises(StorageError, match="Could not download"):
+        store.load()
+
+
+def test_bad_token_is_reported_not_treated_as_first_run():
+    store, calls = MemoryStore("me", KEY, {}), []
+    fake_kaggle(store, [(1, "401 Unauthorized"), (1, "401 Unauthorized")], calls)
+    with pytest.raises(StorageError, match="login failed"):
+        store.load()
+
+
 def test_network_error_refuses_to_start_empty():
     store, calls = MemoryStore("me", KEY, {}), []
-    fake_kaggle(store, [(1, "Connection timed out")], calls)
+    fake_kaggle(store, [(1, "Connection timed out"), (1, "Connection timed out")], calls)
     with pytest.raises(StorageError):
         store.load()
 

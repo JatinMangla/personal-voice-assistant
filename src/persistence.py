@@ -39,7 +39,9 @@ class MemoryStore:
                                   "--unzip", "--force")
             output = (result.stdout + result.stderr).lower()
             if result.returncode != 0:
-                if "404" in output or "not found" in output:
+                # Kaggle answers 403 (not 404) for a private dataset that doesn't exist
+                # yet, so ask the list of our own datasets to tell "first run" apart.
+                if "404" in output or "not found" in output or not self._memory_dataset_exists():
                     return None
                 raise StorageError(f"Could not download memory: {result.stderr.strip()[-300:]}")
             files = list(Path(tmp).rglob(config.MEMORY_FILE_NAME))
@@ -47,6 +49,18 @@ class MemoryStore:
                 raise StorageError("Memory dataset exists but has no memory file in it.")
             self.exists = True
             return crypto.decrypt(files[0].read_bytes(), self.key)
+
+    def _memory_dataset_exists(self) -> bool:
+        """True/False from the list of your own datasets. Raises if Kaggle refuses
+        the login itself, so a wrong token is never mistaken for "no memory yet"."""
+        result = self._kaggle("datasets", "list", "--mine", "--search",
+                              config.MEMORY_DATASET_SLUG, "--csv")
+        if result.returncode != 0:
+            raise StorageError("Kaggle login failed. Check the KAGGLE_USERNAME and "
+                               "KAGGLE_API_TOKEN secrets. Details: "
+                               f"{(result.stderr or result.stdout).strip()[-300:]}")
+        refs = [line.split(",", 1)[0].strip().lower() for line in result.stdout.splitlines()]
+        return self.dataset.lower() in refs
 
     def save(self, plaintext: bytes, attempts: int = 3) -> bool:
         blob = crypto.encrypt(plaintext, self.key)
