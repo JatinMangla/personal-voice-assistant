@@ -91,7 +91,17 @@ def run() -> None:
     list(stt.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
     def warm_up_llm():
         for model in picker.in_use():
+            t = time.time()
+            llm.load_model(model)  # first load reads ~6 GB: allow several minutes
+            print(f"[setup] {model} loaded in {time.time() - t:.0f}s")
             "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model))
+
+    def report_devices():
+        devices = setup_env.ollama_devices()
+        print(f"[setup] Ollama computes on: {', '.join(devices) or 'unknown'}")
+        if devices and all(d.startswith("cpu") for d in devices):
+            print("[setup] WARNING: Ollama found no GPU, so replies will be very slow. "
+                  "Check Accelerator = GPU T4 x2.")
 
     t = time.time()
     try:
@@ -101,6 +111,7 @@ def run() -> None:
         print("[setup] reinstalling Ollama from the internet and trying once more")
         setup_env.reinstall_ollama_online()
         warm_up_llm()
+    report_devices()
     print(f"[setup] LLM warm-up done in {time.time() - t:.1f}s")
 
     # --- web app + tunnel ---------------------------------------------------------

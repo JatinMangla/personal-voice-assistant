@@ -5,6 +5,7 @@ as an input) when it is there, and downloads everything otherwise (slower).
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -136,6 +137,21 @@ def ollama_log_tail(lines: int = 25) -> str:
                          .splitlines()[-lines:])
     except OSError:
         return "(no Ollama log)"
+
+
+def ollama_devices() -> list[str]:
+    """What Ollama will compute on, from its start-up log, e.g. ["cuda: Tesla T4"]."""
+    try:
+        log = (config.WORK_DIR / "ollama.log").read_text(errors="ignore")
+    except OSError:
+        return []
+    devices = []
+    for line in log.splitlines():
+        if 'msg="inference compute"' in line:
+            fields = {k: v.strip('"') for k, v in re.findall(r'(\w+)=("[^"]*"|\S+)', line)}
+            devices.append(f"{fields.get('library', '?').lower()}: "
+                           f"{fields.get('description') or fields.get('name', '?')}")
+    return devices
 
 
 def reinstall_ollama_online() -> None:

@@ -158,6 +158,15 @@ class ModelPicker:
         return self.tuned if self.decision == "tuned" else self.base
 
 
+def load_model(model: str, timeout: float = 600) -> None:
+    """Load a model into GPU memory ahead of time. The first load reads the whole
+    model file (~6 GB) and can take minutes; replies are fast afterwards."""
+    resp = requests.post(f"{config.OLLAMA_URL}/api/generate",
+                         json={"model": model, "keep_alive": "60m"}, timeout=(5, timeout))
+    if resp.status_code >= 400:
+        raise RuntimeError(f"Ollama error {resp.status_code}: {resp.text.strip()[:500]}")
+
+
 def is_ready(model: str) -> bool:
     try:
         tags = requests.get(f"{config.OLLAMA_URL}/api/tags", timeout=5).json()
