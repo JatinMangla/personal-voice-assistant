@@ -93,8 +93,11 @@ class Assistant:
     # --- one spoken turn -------------------------------------------------------
     def handle_turn(self, audio: bytes):
         """Generator of NDJSON events: transcript, then sentence text + audio pairs."""
+        t0 = time.time()
+        first_audio = None
         try:
             text, lang = self.stt.transcribe(audio)
+            heard = time.time() - t0
             yield _line(type="transcript", text=text, lang=lang)
             if not text:
                 yield _line(type="done", heard=False)
@@ -121,7 +124,12 @@ class Assistant:
                 for sentence in self._llm_sentences(text, lang, now, model):
                     reply_parts.append(sentence)
                     yield from self._speak(sentence, lang)
+                    first_audio = first_audio or time.time() - t0
                 turn_id = self.memory.add_turn(text, " ".join(reply_parts), lang, now, model)
+                # Timings only; never the words.
+                print(f"[turn] {lang}: heard in {heard:.1f}s, first audio at "
+                      f"{first_audio or 0:.1f}s, done at {time.time() - t0:.1f}s "
+                      f"({llm.speed_report()})")
 
             while not self.notices.empty():  # free-plan warnings, spoken once each
                 yield from self._speak(notice_text(self.notices.get(), lang), lang)

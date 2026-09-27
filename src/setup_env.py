@@ -92,8 +92,9 @@ def install_ollama(cache: Path | None) -> Path:
             shutil.copy(cached_bin, "/usr/local/bin/ollama")
             os.chmod("/usr/local/bin/ollama", 0o755)
             # Copied, not linked: /kaggle/input may not allow loading libraries from it.
+            # cuda_v13 is skipped: Kaggle's T4 driver uses cuda_v12 (saves ~30 s of copying).
             shutil.copytree(cache / "ollama" / "lib" / "ollama", "/usr/local/lib/ollama",
-                            dirs_exist_ok=True)
+                            dirs_exist_ok=True, ignore=shutil.ignore_patterns("cuda_v13*"))
             # Kaggle's saved output drops the "executable" permission, but Ollama runs
             # helper programs from this folder (e.g. llama-server).
             sh("chmod -R a+rx /usr/local/lib/ollama")

@@ -65,6 +65,15 @@ class FakeResponse:
         return iter(self.lines)
 
 
+def test_speed_report_from_final_message(monkeypatch):
+    final = {"done": True, "eval_count": 40, "eval_duration": 2_000_000_000,
+             "prompt_eval_count": 300, "prompt_eval_duration": 500_000_000}
+    monkeypatch.setattr(llm.requests, "post", lambda *a, **k: FakeResponse(
+        [{"message": {"content": "OK."}}, final]))
+    assert "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], "m")) == "OK."
+    assert llm.speed_report() == "reply 40 tokens at 20.0 tokens/s, prompt 300 tokens in 0.5s"
+
+
 def test_llm_searches_then_answers(monkeypatch):
     searched = []
     tools.register(tools.Tool("web_search", "search", {}, lambda query: searched.append(query)

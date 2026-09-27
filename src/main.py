@@ -137,7 +137,12 @@ def _run(ctx: dict) -> None:
     def warm_up_llm():
         for model in picker.in_use():
             llm.load_model(model)  # instant if the preload worked
-            "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model))
+            t0 = time.time()
+            reply = "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model,
+                                             max_tokens=40))
+            # If the reply is long or slow, the model may be "thinking" despite think=False.
+            print(f"[setup] {model} test reply in {time.time() - t0:.1f}s "
+                  f"({len(reply)} chars; {llm.speed_report()})")
 
     def report_devices():
         devices = setup_env.ollama_devices()

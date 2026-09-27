@@ -49,9 +49,11 @@ def build_messages(user_text: str, lang: str, facts: list[str], related: list[st
 
 
 _NO_THINK_OPTION: set[str] = set()  # models that reject the "think" setting
+LAST_STATS: dict = {}  # speed numbers of the last reply (Ollama's final message)
 
 
-def stream_reply(messages: list[dict], model: str | None = None) -> Iterator[str]:
+def stream_reply(messages: list[dict], model: str | None = None,
+                 max_tokens: int | None = None) -> Iterator[str]:
     """Yield reply text pieces as the model writes them. Runs registered tools."""
     model = model or config.LLM_MODEL
     messages = list(messages)
@@ -62,7 +64,7 @@ def stream_reply(messages: list[dict], model: str | None = None) -> Iterator[str
             "stream": True,
             "keep_alive": "60m",
             "options": {"num_ctx": config.LLM_CONTEXT_TOKENS,
-                        "num_predict": config.LLM_MAX_REPLY_TOKENS},
+                        "num_predict": max_tokens or config.LLM_MAX_REPLY_TOKENS},
         }
         if model not in _NO_THINK_OPTION:
             payload["think"] = False  # no hidden reasoning: much faster for voice
@@ -85,6 +87,11 @@ def stream_reply(messages: list[dict], model: str | None = None) -> Iterator[str
                 chunk = json.loads(line)
                 if "error" in chunk:
                     raise RuntimeError(f"Ollama error: {chunk['error']}")
+                if chunk.get("done"):
+                    LAST_STATS.clear()
+                    LAST_STATS.update({k: chunk.get(k, 0) for k in
+                                       ("prompt_eval_count", "prompt_eval_duration",
+                                        "eval_count", "eval_duration", "total_duration")})
                 message = chunk.get("message", {})
                 tool_calls += message.get("tool_calls") or []
                 if message.get("content"):
@@ -160,6 +167,16 @@ class ModelPicker:
         if self.decision == "ab":
             return random.choice([self.base, self.tuned])
         return self.tuned if self.decision == "tuned" else self.base
+
+
+def speed_report() -> str:
+    """e.g. 'reply 12 tokens at 18.5 tokens/s, prompt 240 tokens in 0.9s'."""
+    s = LAST_STATS
+    if not s.get("eval_duration"):
+        return "no speed data"
+    rate = s["eval_count"] / (s["eval_duration"] / 1e9)
+    return (f"reply {s['eval_count']} tokens at {rate:.1f} tokens/s, "
+            f"prompt {s['prompt_eval_count']} tokens in {s['prompt_eval_duration'] / 1e9:.1f}s")
 
 
 def load_model(model: str, timeout: float = 600) -> None:
