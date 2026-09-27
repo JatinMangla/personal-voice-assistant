@@ -68,7 +68,7 @@ python scripts/make_key.py
 Copy the printed key. **Save it in your password manager.** If you lose it, the saved memory cannot be recovered.
 
 ### 4. Upload the code to Kaggle
-1. In PowerShell, in this folder: `Compress-Archive -Path src -DestinationPath assistant-code.zip -Force`
+1. In PowerShell, in this folder: `python scripts/make_code_zip.py`. This creates `assistant-code.zip`. Don't use Windows "Compress to ZIP": its folder paths break on Kaggle.
 2. Kaggle → **Create → New Dataset**. Upload `assistant-code.zip`, name it `assistant-code`, and keep it **Private**. Click Create.
 
 ### 5. Build the model cache (makes daily start ~1 min instead of ~5)
