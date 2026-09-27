@@ -66,7 +66,7 @@ def install_ngrok(cache: Path | None) -> None:
     if target.exists():
         return
     if cache and (cache / "ngrok" / "ngrok").exists():
-        shutil.copy(cache / "ngrok" / "ngrok", target)
+        shutil.copy(cache / "ngrok" / "ngrok", target)  # chmod below restores "executable"
     else:
         sh(f"curl -fsSL {NGROK_URL} | tar -xz -C /usr/local/bin")
     target.chmod(0o755)
@@ -90,6 +90,9 @@ def install_ollama(cache: Path | None) -> Path:
             # Copied, not linked: /kaggle/input may not allow loading libraries from it.
             shutil.copytree(cache / "ollama" / "lib" / "ollama", "/usr/local/lib/ollama",
                             dirs_exist_ok=True)
+            # Kaggle's saved output drops the "executable" permission, but Ollama runs
+            # helper programs from this folder (e.g. llama-server).
+            sh("chmod -R a+rx /usr/local/lib/ollama")
         else:
             _install_ollama_online()
     if cache and (cache / "ollama" / "models").is_dir() and not models_dir.exists():
@@ -105,7 +108,9 @@ _ollama_models_dir: Path | None = None
 def start_ollama(models_dir: Path | None = None) -> None:
     global _ollama_models_dir
     _ollama_models_dir = models_dir or _ollama_models_dir
-    subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True)
+    # The online installer may start its own Ollama service; ours needs the port.
+    subprocess.run("systemctl stop ollama 2>/dev/null; pkill -f 'ollama serve'; true", shell=True)
+    time.sleep(1)
     env = {**os.environ,
            "CUDA_VISIBLE_DEVICES": config.OLLAMA_GPU,
            "OLLAMA_MODELS": str(_ollama_models_dir),
