@@ -155,6 +155,8 @@ The page shows minutes used today and when memory was last saved.
 | "याद रखना कि मेरी मीटिंग सोमवार को है" | Same, in Hindi |
 | "Forget that my car number…" / "…भूल जाओ" | Deletes the closest matching fact, and past chats that closely match it |
 | "Who sang Kesariya?" / "Latest India cricket score" | Searches the internet (Google first, then Bing, Brave or DuckDuckGo, then Wikipedia) and answers from the results. Free, no API key. |
+| "Give me the YouTube link of Kesariya" | Finds the video. The links appear as buttons under the reply; the voice never reads web addresses. |
+| Just mention things about yourself: "I'm allergic to peanuts", "my daughter Riya is 8" | Jarvis **learns lasting facts by itself**, with no "remember that" needed. A note "🧠 Learned: …" shows what it picked up. Health and diet facts are always in front of it, so months later a recipe with peanuts comes with a warning and a substitute. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
 | Tap 👍 / 👎 under a reply | Rates it (tap again to undo). 👍 replies are what the assistant later learns your style from (Phase 5). |
 
@@ -168,6 +170,7 @@ The page shows minutes used today and when memory was last saved.
 | Your memory dataset leaks or is made public by mistake | **Yes.** It is only ciphertext; old versions are deleted on every save. |
 | Someone reads the notebook logs | **Yes.** Conversations are never printed. |
 | Internet search leaking personal data | **Yes.** Only the short search words the assistant picks are sent to the search engine; never your memory. Web results are treated as untrusted text and can't trigger any action. Set `WEB_SEARCH = False` in `src/config.py` to turn internet off. |
+| Learning something it shouldn't | **Mostly.** It learns only from *your* words, never web text; anything that looks private (numbers, PINs, OTPs, passwords, emails) is never learned; you see every learned fact on screen, and "forget that …" removes it. Set `LEARN_FROM_CHAT = False` in `src/config.py` to switch learning off. |
 | "Forget" leaving traces | **Mostly.** Deleted rows are zeroed in the database and old dataset versions are deleted. |
 | Your Google/Kaggle/GitHub account is hacked | **No.** The key sits in Kaggle Secrets, and the Kaggle token (also in GitHub if you use the Start button) can run notebooks that use it. That's why 2-step verification on all three is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |

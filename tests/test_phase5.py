@@ -57,7 +57,7 @@ def test_build_examples_skips_private_and_uses_chat_format():
     assert len(examples) == 2
     assert [m["role"] for m in examples[0]] == ["system", "user", "assistant"]
     assert "Devanagari" in examples[1][0]["content"]
-    assert "Facts the user asked" not in examples[0][0]["content"]  # no personal facts
+    assert "What you know about the user" not in examples[0][0]["content"]  # no personal facts
 
 
 def test_training_time_respects_budget():

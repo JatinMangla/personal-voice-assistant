@@ -73,9 +73,15 @@ class Memory:
         # Overwrite deleted rows with zeros, so "forget" leaves no trace in the file.
         self.conn.execute("PRAGMA secure_delete = ON")
         self.conn.executescript(SCHEMA)
-        columns = {row[1] for row in self.conn.execute("PRAGMA table_info(turns)")}
-        if "model" not in columns:  # added in Phase 5: which LLM gave the reply
-            self.conn.execute("ALTER TABLE turns ADD COLUMN model TEXT")
+        self._add_column("turns", "model", "TEXT")      # Phase 5: which LLM replied
+        self._add_column("facts", "category", "TEXT")   # health, diet, person, ...
+        self._add_column("facts", "source", "TEXT")     # "user" (said "remember") or "auto"
+
+    def _add_column(self, table: str, column: str, kind: str) -> None:
+        """Upgrade databases saved by older versions."""
+        columns = {row[1] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
 
     # --- save / load ---------------------------------------------------------
     def to_bytes(self) -> bytes:
@@ -138,12 +144,13 @@ class Memory:
             return self.conn.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
 
     # --- facts ----------------------------------------------------------------
-    def add_fact(self, text: str, now: datetime) -> None:
+    def add_fact(self, text: str, now: datetime, category: str | None = None,
+                 source: str = "user") -> None:
         emb = self.embedder.embed_passage(text)
         with self.lock:
             self.conn.execute(
-                "INSERT INTO facts (ts, text, emb) VALUES (?, ?, ?)",
-                (now.isoformat(timespec="seconds"), text, _to_blob(emb)),
+                "INSERT INTO facts (ts, text, emb, category, source) VALUES (?, ?, ?, ?, ?)",
+                (now.isoformat(timespec="seconds"), text, _to_blob(emb), category, source),
             )
             self.conn.commit()
             self.dirty = True
@@ -154,6 +161,36 @@ class Memory:
                 "SELECT text FROM facts ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
         return [r[0] for r in reversed(rows)]
+
+    def facts_for_prompt(self, query: str, limit: int,
+                         always_categories: tuple[str, ...]) -> list[str]:
+        """Facts to show the LLM for this question. Always: facts you asked it to
+        remember and health/diet facts (e.g. allergies), so it can warn you even when
+        you don't mention them. Then the learned facts most related to the question."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT text, category, source, emb FROM facts ORDER BY id").fetchall()
+        always = [t for t, cat, src, _ in rows if src != "auto" or cat in always_categories]
+        others = [(t, e) for t, cat, src, e in rows if not (src != "auto" or cat in always_categories)]
+        room = max(0, limit - len(always))
+        if others and room:
+            q = self.embedder.embed_query(query)
+            others.sort(key=lambda te: float(np.dot(q, _from_blob(te[1]))), reverse=True)
+        return always + [t for t, _ in others[:room]]
+
+    def similar_facts(self, text: str, k: int) -> list[tuple[int, str, float]]:
+        """(id, text, similarity) of the k facts most like `text`."""
+        q = self.embedder.embed_query(text)
+        with self.lock:
+            rows = self.conn.execute("SELECT id, text, emb FROM facts").fetchall()
+        scored = [(fid, t, float(np.dot(q, _from_blob(e)))) for fid, t, e in rows]
+        return sorted(scored, key=lambda r: r[2], reverse=True)[:k]
+
+    def delete_fact(self, fact_id: int) -> None:
+        with self.lock:
+            self.conn.execute("DELETE FROM facts WHERE id = ?", (fact_id,))
+            self.conn.commit()
+            self.dirty = True
 
     def forget(self, query: str, min_similarity: float) -> tuple[str | None, int]:
         """Delete the fact that best matches `query`, plus past turns that closely

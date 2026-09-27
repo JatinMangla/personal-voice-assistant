@@ -56,6 +56,11 @@ MEMORY_MIN_SIMILARITY = 0.80  # e5 scores are high overall; below this = unrelat
 ALL_FACTS_LIMIT = 30          # facts always included in the prompt
 RECENT_TURNS = 6              # last N turns of this session sent as chat history
 FORGET_MIN_SIMILARITY = 0.85
+# Learning facts from normal conversation (learn.py)
+LEARN_FROM_CHAT = True
+ALWAYS_SHOWN_CATEGORIES = ("health", "diet")  # e.g. allergies: in every prompt
+LEARN_KNOWN_FACTS = 5                # similar known facts shown, so changes replace them
+LEARN_DUPLICATE_SIMILARITY = 0.93    # at or above this, a new fact counts as known
 DELETE_OLD_DATASET_VERSIONS = True  # so "forget" also removes old copies
 
 # --- Session ---------------------------------------------------------------------

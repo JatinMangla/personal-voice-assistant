@@ -28,10 +28,17 @@ def system_prompt(lang: str, facts: list[str], related: list[str], now: datetime
     ]
     if "web_search" in tools.REGISTRY:
         parts.append("You can search the internet with the web_search tool. Use it for "
-                     "songs, news, prices, recent events or facts you are unsure about; "
-                     "then answer briefly from the results. Never read out web addresses.")
+                     "news, prices, recent events or facts you are unsure about; then answer "
+                     "briefly from the results. For songs, music or videos, or when the user "
+                     "asks for a YouTube link, use find_video. Links you find are shown on the "
+                     "user's screen automatically: just say they are on the screen. Never read "
+                     "out web addresses.")
     if facts:
-        parts.append("Facts the user asked you to remember:\n" + "\n".join(f"- {f}" for f in facts))
+        parts.append(
+            "What you know about the user. Apply it on your own, without being asked: for "
+            "example, if a recipe, dish or product contains something the user is allergic "
+            "to or avoids, clearly warn them and suggest a substitute; respect their diet, "
+            "health and preferences in every answer.\n" + "\n".join(f"- {f}" for f in facts))
     if related:
         parts.append("Possibly related past conversations (use only if relevant):\n"
                      + "\n".join(f"- {r}" for r in related))

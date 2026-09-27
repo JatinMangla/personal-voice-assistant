@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import queue
+import re
 import threading
 import time
 from datetime import datetime
@@ -15,9 +16,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 
 import config
+import learn
 import llm
+import websearch
 from budget import Budget, Meter, current_meters, minutes_until_stop
 from intents import parse_command
+
+_URL = re.compile(r"(https?://|www\.)\S+")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -120,12 +125,17 @@ class Assistant:
                     yield from self._speak(sentence, lang)
             else:
                 model = self.picker.pick()
+                websearch.take_links()  # start this turn with no links
                 reply_parts = []
                 for sentence in self._llm_sentences(text, lang, now, model):
                     reply_parts.append(sentence)
                     yield from self._speak(sentence, lang)
                     first_audio = first_audio or time.time() - t0
+                links = websearch.take_links()
+                if links:
+                    yield _line(type="links", links=links)
                 turn_id = self.memory.add_turn(text, " ".join(reply_parts), lang, now, model)
+                yield from self._learn(text, now)
                 # Timings only; never the words.
                 print(f"[turn] {lang}: heard in {heard:.1f}s, first audio at "
                       f"{first_audio or 0:.1f}s, done at {time.time() - t0:.1f}s "
@@ -146,16 +156,34 @@ class Assistant:
         history = self.memory.recent_turns(config.RECENT_TURNS)
         related = self.memory.search(text, config.MEMORY_TOP_K, config.MEMORY_MIN_SIMILARITY,
                                      exclude_recent_turns=config.RECENT_TURNS)
-        facts = self.memory.all_facts(config.ALL_FACTS_LIMIT)
+        facts = self.memory.facts_for_prompt(text, config.ALL_FACTS_LIMIT,
+                                             config.ALWAYS_SHOWN_CATEGORIES)
         messages = llm.build_messages(text, lang, facts, related, history, now)
         chunker = llm.SentenceChunker()
         for piece in llm.stream_reply(messages, model):
             yield from chunker.feed(piece)
         yield from chunker.flush()
 
-    def _speak(self, sentence: str, lang: str, ignore_errors: bool = False):
+    def _learn(self, text: str, now: datetime):
+        """Pick up lasting facts from what the user said; never breaks the turn."""
+        if not config.LEARN_FROM_CHAT:
+            return
         try:
-            wav = self.tts.synthesize(sentence, lang)
+            learned = learn.learn(self.memory, text, now)
+        except Exception as e:
+            print(f"[learn] skipped: {type(e).__name__}")
+            return
+        if learned:
+            print(f"[learn] {len(learned)} new fact(s)")  # count only, never the content
+            yield _line(type="learned", facts=learned)
+
+    def _speak(self, sentence: str, lang: str, ignore_errors: bool = False):
+        spoken = _URL.sub("", sentence).strip()  # links are shown, never read out
+        if not spoken:
+            yield _line(type="sentence", text=sentence, audio=None)
+            return
+        try:
+            wav = self.tts.synthesize(spoken, lang)
         except Exception:
             if not ignore_errors:
                 raise

@@ -41,6 +41,11 @@
   .bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border);
     border-bottom-left-radius: 4px; }
   .hint { color: var(--muted); text-align: center; font-size: 14px; margin: auto 0; }
+  .links { align-self: flex-start; display: flex; flex-direction: column; gap: 6px; max-width: 88%; }
+  .links a { display: block; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--card); color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
+  .links a small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .note { align-self: flex-start; max-width: 88%; font-size: 13px; color: var(--muted); }
   .rate { align-self: flex-start; display: flex; gap: 6px; margin-top: -4px; }
   .rate button { font-size: 15px; line-height: 1; padding: 6px 10px; border-radius: 999px; cursor: pointer;
     background: transparent; border: 1px solid var(--border); opacity: .6; }
@@ -215,6 +220,10 @@ async function sendTurn(blob) {
         } else if (ev.type === "done" && !ev.heard) {
           setState("ready", "Didn't catch that. Tap to try again.");
           return;
+        } else if (ev.type === "links") {
+          addLinks(ev.links);
+        } else if (ev.type === "learned") {
+          addNote("🧠 Learned: " + ev.facts.join(" ") + ' (say "forget that …" to remove)');
         } else if (ev.type === "done" && ev.turn_id) {
           addRating(ev.turn_id);
         }
@@ -232,6 +241,32 @@ $("mic").addEventListener("click", () => {
   if (recorder && recorder.state === "recording") { recorder.stop(); return; }
   startListening();
 });
+
+// ---------- links found on the internet (shown, never read aloud) ----------
+function addLinks(links) {
+  const box = document.createElement("div");
+  box.className = "links";
+  for (const l of links) {
+    if (!/^https?:\/\//i.test(l.url)) continue;  // web links only
+    const a = document.createElement("a");
+    a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.textContent = l.title;
+    const small = document.createElement("small");
+    let host = ""; try { host = new URL(l.url).hostname.replace(/^www\./, ""); } catch (e) {}
+    small.textContent = [l.note, host].filter(Boolean).join(" · ");
+    a.appendChild(small);
+    box.appendChild(a);
+  }
+  if (box.childElementCount) { $("log").appendChild(box); $("log").scrollTop = $("log").scrollHeight; }
+}
+
+function addNote(text) {
+  const note = document.createElement("div");
+  note.className = "note";
+  note.textContent = text;
+  $("log").appendChild(note);
+  $("log").scrollTop = $("log").scrollHeight;
+}
 
 // ---------- 👍 / 👎 on each reply: 👍 replies teach the assistant your style later ----------
 function addRating(turnId) {
