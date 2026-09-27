@@ -82,6 +82,9 @@ def install_ollama(cache: Path | None) -> Path:
             if not lib.exists():
                 lib.symlink_to(cache / "ollama" / "lib" / "ollama")
         else:
+            # The Ollama installer now needs "zstd" to unpack; Kaggle machines may not have it.
+            sh("command -v zstd || apt-get install -y -qq zstd "
+               "|| (apt-get update -qq && apt-get install -y -qq zstd)", stdout=subprocess.DEVNULL)
             sh("curl -fsSL https://ollama.com/install.sh | sh", stdout=subprocess.DEVNULL)
     if cache and (cache / "ollama" / "models").is_dir() and not models_dir.exists():
         # A tree of symlinks: instant, and nothing is copied off the read-only input.
