@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -85,11 +86,27 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         shutil.copy(ROOT / "notebooks" / "assistant.ipynb", Path(tmp) / "assistant.ipynb")
         (Path(tmp) / "kernel-metadata.json").write_text(json.dumps(kernel_metadata(s), indent=1))
-        result = kaggle("kernels", "push", "-p", tmp)
-    print((result.stdout + result.stderr).strip())
-    if result.returncode != 0:
-        sys.exit("Could not start Jarvis. Check the notebook name (JARVIS_NOTEBOOK) and token.")
-    print("Started. Jarvis is ready in about 4-5 minutes; then open your link.")
+        for attempt in range(1, 4):
+            result = kaggle("kernels", "push", "-p", tmp)
+            output = (result.stdout + result.stderr).strip()
+            print(output)
+            if push_ok(result.returncode, output):
+                print("Started. Jarvis is ready in about 4-5 minutes; then open your link.")
+                return
+            if "concurrencyviolation" not in output.lower():
+                break
+            # The notebook changed at the same moment (usually an open Kaggle editor tab
+            # saving its draft). Wait and try again.
+            print(f"Kaggle reports a simultaneous change; retrying ({attempt}/3)...")
+            time.sleep(10)
+    sys.exit("Could not start Jarvis. Close any open Kaggle editor tab of Jarvis and try "
+             "again; also check the notebook name (JARVIS_NOTEBOOK) and the token.")
+
+
+def push_ok(returncode: int, output: str) -> bool:
+    """The kaggle tool can print an error but still exit with 0."""
+    text = output.lower()
+    return returncode == 0 and "error" not in text and "violation" not in text
 
 
 if __name__ == "__main__":

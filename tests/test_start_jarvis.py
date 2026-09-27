@@ -39,6 +39,35 @@ def test_missing_token_stops_with_help(monkeypatch):
         start_jarvis.settings()
 
 
+def test_push_retries_after_concurrency_violation(monkeypatch, tmp_path):
+    monkeypatch.setenv("KAGGLE_USERNAME", "jatinmangla123")
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "KGAT_x")
+    monkeypatch.setattr(start_jarvis.time, "sleep", lambda s: None)
+    answers = [
+        (0, 'jatinmangla123/jarvis has status "KernelWorkerStatus.COMPLETE"'),  # status
+        (0, "An error occurred while committing kernel: ConcurrencyViolation Sequence "
+            "number must match Draft record"),                                  # push 1
+        (0, "Kernel version 12 successfully pushed."),                          # push 2
+    ]
+    calls = []
+
+    def fake_kaggle(*args):
+        calls.append(args)
+        code, out = answers.pop(0)
+        return start_jarvis.subprocess.CompletedProcess(args, code, stdout=out, stderr="")
+
+    monkeypatch.setattr(start_jarvis, "kaggle", fake_kaggle)
+    start_jarvis.main()  # no SystemExit: the retry worked
+    assert [c[:2] for c in calls] == [("kernels", "status"), ("kernels", "push"),
+                                      ("kernels", "push")]
+
+
+def test_push_error_text_counts_as_failure():
+    assert not start_jarvis.push_ok(0, "An error occurred while committing kernel: ...")
+    assert start_jarvis.push_ok(0, "Kernel version 12 successfully pushed.")
+    assert not start_jarvis.push_ok(1, "")
+
+
 @pytest.mark.parametrize("output, running", [
     ('jatinmangla123/jarvis has status "KernelWorkerStatus.RUNNING"', True),
     ('jatinmangla123/jarvis has status "KernelWorkerStatus.QUEUED"', True),
