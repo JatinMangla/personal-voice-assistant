@@ -9,6 +9,29 @@ import config
 
 
 def run() -> None:
+    ctx: dict = {}
+    try:
+        _run(ctx)
+    except BaseException:
+        # A start that crashes still used GPU time: record it, so the free-limit
+        # guard stays accurate.
+        if "memory" in ctx and not ctx.get("ready"):
+            _record_failed_start(ctx)
+        raise
+
+
+def _record_failed_start(ctx: dict) -> None:
+    from datetime import datetime
+    try:
+        now = datetime.now(ZoneInfo(config.TIMEZONE))
+        ctx["memory"].add_usage(*ctx["timer"].tick(now))
+        ok = ctx["store"].save(ctx["memory"].to_bytes())
+        print(f"[budget] GPU time of this failed start {'recorded' if ok else 'NOT recorded'}")
+    except Exception as e:
+        print(f"[budget] could not record GPU time: {type(e).__name__}: {e}")
+
+
+def _run(ctx: dict) -> None:
     started = time.time()
     import setup_env
     setup_env.install_basics()
@@ -40,6 +63,7 @@ def run() -> None:
     now = datetime.now(ZoneInfo(config.TIMEZONE))
     memory.add_usage(now.date().isoformat(), config.SESSION_OVERHEAD_MIN * 60)
     timer = SessionTimer(now, config.IDLE_TIMEOUT_MIN * 60)  # counts setup time too
+    ctx.update(memory=memory, store=store, timer=timer)
 
     budget = Budget(config.NOTIFY_AT, config.STOP_AT)
     meters = current_meters(memory, now)
@@ -54,6 +78,7 @@ def run() -> None:
               "Day limits reset at midnight IST, week limits as old days roll off, "
               "link limits next month.")
         store.save(memory.to_bytes())  # record this short session's GPU time
+        ctx["ready"] = True  # already recorded
         return
     for m in budget.warnings(meters):
         print(f"[budget] warning: {m.name} is above {config.NOTIFY_AT:.0%}")
@@ -127,6 +152,7 @@ def run() -> None:
     ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None)
 
     timer.touch(now_ist())
+    ctx["ready"] = True  # from here on the watchdog and close() record usage
     threading.Thread(target=assistant.watchdog, daemon=True).start()
     url = "https://" + ngrok_domain.removeprefix("https://").strip("/")
     login = "Google sign-in" if allowed_emails else "password page"
