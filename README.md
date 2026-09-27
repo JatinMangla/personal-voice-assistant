@@ -123,9 +123,12 @@ It uses GitHub Actions: free for private repos, and each start takes under a min
    git push -u origin main
    ```
    A browser window asks you to sign in to GitHub the first time. Your secrets are **not** in the project (`.gitignore` keeps keys and zips out).
-4. **Secrets on GitHub:** repo → **Settings → Secrets and variables → Actions → New repository secret**:
-   - `KAGGLE_USERNAME`: your Kaggle username
-   - `KAGGLE_API_TOKEN`: your Kaggle API token
+4. **Secrets on GitHub:** repo → **Settings → Secrets and variables → Actions → New repository secret**. Use the same values as your Kaggle secrets:
+   - `KAGGLE_USERNAME`, `KAGGLE_API_TOKEN`
+   - `MEMORY_KEY`, `NGROK_AUTHTOKEN`, `NGROK_DOMAIN`, `ALLOWED_EMAIL`
+   - `START_URL` (optional)
+
+   Why all of them: Kaggle gives **no Kaggle Secrets** to runs started through its API, which is a Kaggle limitation. So each press encrypts these with a new one-time key and uploads them as the private dataset `jarvis-secrets`, replacing the previous upload. The key goes into the notebook it starts. Neither part alone reveals anything, and an old key is useless after the next start.
 5. **Check the notebook name:** open Jarvis on Kaggle and look at the address, `kaggle.com/code/<username>/<name>`. If `<name>` is not `jarvis`, go to the same GitHub page → **Variables** tab → **New repository variable** `JARVIS_NOTEBOOK` = that name.
 6. **Use it:** GitHub app or github.com → your repo → **Actions → Start Jarvis → Run workflow → Run workflow**.
    - Bookmark `https://github.com/<you>/personal-voice-assistant/actions/workflows/start-jarvis.yml` on your phone.

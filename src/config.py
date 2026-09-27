@@ -126,9 +126,37 @@ def kaggle_credentials() -> tuple[str, dict[str, str]]:
     return username.strip(), env
 
 
+# Runs started by the GitHub "Start Jarvis" button get no Kaggle Secrets (a Kaggle
+# limitation). The button uploads them encrypted with a one-time key instead: the
+# encrypted file comes as the private "jarvis-secrets" dataset, the key inside the
+# notebook it starts (PVA_RUN_KEY). Either part alone reveals nothing.
+INPUT_ROOT = Path("/kaggle/input")
+SECRETS_BUNDLE_FILE = "jarvis-secrets.enc"
+_bundle_cache: dict | None = None
+
+
+def _secrets_bundle() -> dict:
+    global _bundle_cache
+    if _bundle_cache is None:
+        _bundle_cache = {}
+        run_key = os.environ.get("PVA_RUN_KEY")
+        files = list(INPUT_ROOT.glob(f"**/{SECRETS_BUNDLE_FILE}")) if run_key else []
+        if files:
+            import json
+            import crypto
+            try:
+                _bundle_cache = json.loads(crypto.decrypt(files[0].read_bytes(),
+                                                          crypto.load_key(run_key)))
+            except Exception:
+                print("[secrets] the Start button's encrypted secrets don't match this run "
+                      "(an older upload); using Kaggle Secrets instead.")
+    return _bundle_cache
+
+
 def get_secret(name: str, required: bool = True) -> str | None:
-    """Read a Kaggle Secret (or an environment variable when running locally)."""
-    value = os.environ.get(name)
+    """Read a secret: environment variable, the Start button's encrypted bundle, or
+    Kaggle Secrets (when started from the Kaggle editor)."""
+    value = os.environ.get(name) or _secrets_bundle().get(name)
     if not value:
         try:
             from kaggle_secrets import UserSecretsClient
@@ -137,7 +165,8 @@ def get_secret(name: str, required: bool = True) -> str | None:
             value = None
     if required and not value:
         raise RuntimeError(
-            f"Missing secret '{name}'. Add it in Kaggle: Add-ons -> Secrets, "
-            "and tick it for this notebook."
+            f"Missing secret '{name}'. Starting from the Kaggle editor: Add-ons -> Secrets, "
+            "and tick it for this notebook. Starting with the GitHub button: add it as a "
+            "GitHub repository secret (Settings -> Secrets and variables -> Actions)."
         )
     return value

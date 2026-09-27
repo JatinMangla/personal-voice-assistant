@@ -17,10 +17,18 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -q kaggle
+      - run: pip install -q kaggle cryptography
       - run: python scripts/start_jarvis.py
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || vars.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          # Kaggle gives no Kaggle Secrets to runs started from here, so these are
+          # passed on encrypted with a one-time key (see scripts/start_jarvis.py).
+          MEMORY_KEY: ${{ secrets.MEMORY_KEY }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+          NGROK_DOMAIN: ${{ secrets.NGROK_DOMAIN }}
+          ALLOWED_EMAIL: ${{ secrets.ALLOWED_EMAIL }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          START_URL: ${{ secrets.START_URL }}
           JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
           JARVIS_EXTRA: ${{ vars.JARVIS_EXTRA || '' }}

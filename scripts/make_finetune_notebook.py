@@ -5,11 +5,11 @@ cells = []
 
 
 def md(text):
-    cells.append({"cell_type": "markdown", "metadata": {}, "source": text.strip("\n").splitlines(True)})
+    cells.append({"cell_type": "markdown", "id": f"cell-{len(cells)}", "metadata": {}, "source": text.strip("\n").splitlines(True)})
 
 
 def code(text):
-    cells.append({"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [],
+    cells.append({"cell_type": "code", "id": f"cell-{len(cells)}", "execution_count": None, "metadata": {}, "outputs": [],
                   "source": text.strip("\n").splitlines(True)})
 
 
