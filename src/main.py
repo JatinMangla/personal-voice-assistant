@@ -95,8 +95,9 @@ def _run(ctx: dict) -> None:
     from stt import SpeechToText
     from tts import TextToSpeech
 
-    device = f"cuda:{paths.speech_device_index}"
-    memory.set_embedder(E5Embedder(paths.embed, device=device))
+    if config.WEB_SEARCH:
+        import websearch
+        websearch.register()
 
     # Phase 5: fine-tuned model, if one is attached -> blind A/B test, then the winner
     tuned = setup_env.install_tuned_model(key)
@@ -107,18 +108,35 @@ def _run(ctx: dict) -> None:
         print(f"[models] base {llm_model}: 👍/👎 {stats.get(llm_model, (0, 0))}  |  "
               f"tuned {tuned}: 👍/👎 {stats.get(tuned, (0, 0))}  ->  using: {picker.decision}")
 
+    # Load the LLM (GPU 0, ~2 min) at the same time as the speech models (GPU 1).
+    def preload_llm():
+        for model in picker.in_use():
+            t0 = time.time()
+            try:
+                llm.load_model(model)  # first load reads ~6 GB: allow several minutes
+                print(f"[setup] {model} loaded in {time.time() - t0:.0f}s")
+            except Exception as e:  # retried (with the fallback) in warm_up_llm below
+                print(f"[setup] {model} preload failed: {str(e)[:200]}")
+
+    t = time.time()
+    preload = threading.Thread(target=preload_llm, daemon=True)
+    preload.start()
+
     # --- speech models + warm-up (first calls are slow, so do them now) -------------
+    device = f"cuda:{paths.speech_device_index}"
+    memory.set_embedder(E5Embedder(paths.embed, device=device))
     stt = SpeechToText(paths.whisper, paths.speech_device_index)
     tts = TextToSpeech(paths.kokoro, device)
     for lang in tts.pipelines:
         tts.synthesize("Hello.", lang)
     import numpy as np
     list(stt.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
+    print(f"[setup] speech models ready in {time.time() - t:.0f}s")
+    preload.join()
+
     def warm_up_llm():
         for model in picker.in_use():
-            t = time.time()
-            llm.load_model(model)  # first load reads ~6 GB: allow several minutes
-            print(f"[setup] {model} loaded in {time.time() - t:.0f}s")
+            llm.load_model(model)  # instant if the preload worked
             "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model))
 
     def report_devices():
@@ -128,7 +146,6 @@ def _run(ctx: dict) -> None:
             print("[setup] WARNING: Ollama found no GPU, so replies will be very slow. "
                   "Check Accelerator = GPU T4 x2.")
 
-    t = time.time()
     try:
         warm_up_llm()
     except Exception as e:

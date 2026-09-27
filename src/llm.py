@@ -26,6 +26,10 @@ def system_prompt(lang: str, facts: list[str], related: list[str], now: datetime
         "You cannot control devices or look things up online unless a tool is available. "
         "Never pretend you did something.",
     ]
+    if "web_search" in tools.REGISTRY:
+        parts.append("You can search the internet with the web_search tool. Use it for "
+                     "songs, news, prices, recent events or facts you are unsure about; "
+                     "then answer briefly from the results. Never read out web addresses.")
     if facts:
         parts.append("Facts the user asked you to remember:\n" + "\n".join(f"- {f}" for f in facts))
     if related:

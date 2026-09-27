@@ -27,6 +27,13 @@ WHISPER_LANGUAGES = ("en", "hi")  # only these are allowed; Urdu is mapped to Hi
 
 EMBED_MODEL = "intfloat/multilingual-e5-small"
 
+# Internet search tool, free and without API keys (ddgs package). Google first; if it
+# blocks the request, the next engines answer; Wikipedia is the last resort.
+WEB_SEARCH = True  # False = the assistant has no internet access
+SEARCH_BACKENDS = "google,bing,brave,duckduckgo"
+SEARCH_REGION = "in-en"
+SEARCH_RESULTS = 5
+
 KOKORO_REPO = "hexgrad/Kokoro-82M"
 # language code -> (Kokoro lang_code, voice)
 TTS_VOICES = {

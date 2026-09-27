@@ -121,6 +121,7 @@ The page shows minutes used today and when memory was last saved.
 | "Remember that my car number is DL 3C 1234" | Saved as a fact. It is always available to the assistant. |
 | "याद रखना कि मेरी मीटिंग सोमवार को है" | Same, in Hindi |
 | "Forget that my car number…" / "…भूल जाओ" | Deletes the closest matching fact, and past chats that closely match it |
+| "Who sang Kesariya?" / "Latest India cricket score" | Searches the internet (Google first, then Bing, Brave or DuckDuckGo, then Wikipedia) and answers from the results. Free, no API key. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
 | Tap 👍 / 👎 under a reply | Rates it (tap again to undo). 👍 replies are what the assistant later learns your style from (Phase 5). |
 
@@ -133,6 +134,7 @@ The page shows minutes used today and when memory was last saved.
 | Someone finds your link | **Yes.** Only your Google account can sign in (ngrok checks this before anything reaches Kaggle). |
 | Your memory dataset leaks or is made public by mistake | **Yes.** It is only ciphertext; old versions are deleted on every save. |
 | Someone reads the notebook logs | **Yes.** Conversations are never printed. |
+| Internet search leaking personal data | **Yes.** Only the short search words the assistant picks are sent to the search engine; never your memory. Web results are treated as untrusted text and can't trigger any action. Set `WEB_SEARCH = False` in `src/config.py` to turn internet off. |
 | "Forget" leaving traces | **Mostly.** Deleted rows are zeroed in the database and old dataset versions are deleted. |
 | Your Google/Kaggle account is hacked | **No.** The key sits in Kaggle Secrets. That's why 2-step verification is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |

@@ -15,10 +15,11 @@ from pathlib import Path
 
 import config
 
-PIP_PACKAGES = [
+FIRST_CACHE_PACKAGES = [  # what the first model cache (2026-09-27) contains
     "faster-whisper==1.2.1", "kokoro==0.9.4", "soundfile", "fastapi", "uvicorn",
     "cryptography", "kaggle", "sentence-transformers",
 ]
+PIP_PACKAGES = FIRST_CACHE_PACKAGES + ["ddgs"]
 NGROK_URL = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
 INPUT_ROOT = Path("/kaggle/input")
 
@@ -55,10 +56,12 @@ def install_basics() -> None:
 def install_packages(cache: Path | None) -> None:
     pip = [sys.executable, "-m", "pip", "install", "-q"]
     if cache and (cache / "wheels").is_dir():
-        offline = pip + ["--no-index", "--find-links", str(cache / "wheels"), *PIP_PACKAGES]
-        if subprocess.run(offline, capture_output=True).returncode == 0:
+        offline = pip + ["--no-index", "--find-links", str(cache / "wheels")]
+        if subprocess.run(offline + PIP_PACKAGES, capture_output=True).returncode == 0:
             return
-        print("[setup] cached packages incomplete; installing from the internet")
+        # Cache built before a package was added: install what it has, fetch the rest.
+        subprocess.run(offline + FIRST_CACHE_PACKAGES, capture_output=True)
+        print("[setup] a few packages are not in the model cache; downloading them")
     subprocess.run(pip + PIP_PACKAGES, check=True)
 
 
