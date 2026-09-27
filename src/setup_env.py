@@ -259,9 +259,22 @@ def prepare() -> tuple[ModelPaths, str]:
     else:
         print("[setup] no model cache attached (see README step 5); everything will download")
 
+    steps, t = [], time.time()
+
+    def step(name: str) -> None:  # how long each part took, to find slow steps
+        nonlocal t
+        steps.append(f"{name} {time.time() - t:.0f}s")
+        t = time.time()
+
     install_packages(cache)
+    step("packages")
     install_ngrok(cache)
+    step("ngrok")
     models_dir = install_ollama(cache)
+    step("ollama install")
     start_ollama(models_dir)
     llm_model = ensure_llm()
-    return model_paths(cache), llm_model
+    step("ollama start")
+    paths = model_paths(cache)
+    print(f"[setup] steps: {', '.join(steps)}")
+    return paths, llm_model
