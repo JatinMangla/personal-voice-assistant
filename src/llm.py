@@ -73,7 +73,8 @@ def stream_reply(messages: list[dict], model: str | None = None) -> Iterator[str
                 _NO_THINK_OPTION.add(model)
                 yield from stream_reply(messages, model)
                 return
-            resp.raise_for_status()
+            if resp.status_code >= 400:  # include Ollama's own explanation
+                raise RuntimeError(f"Ollama error {resp.status_code}: {resp.text.strip()[:500]}")
             for line in resp.iter_lines():
                 if not line:
                     continue

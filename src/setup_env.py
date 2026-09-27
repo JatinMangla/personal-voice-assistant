@@ -72,6 +72,13 @@ def install_ngrok(cache: Path | None) -> None:
     target.chmod(0o755)
 
 
+def _install_ollama_online() -> None:
+    # The Ollama installer now needs "zstd" to unpack; Kaggle machines may not have it.
+    sh("command -v zstd || apt-get install -y -qq zstd "
+       "|| (apt-get update -qq && apt-get install -y -qq zstd)", stdout=subprocess.DEVNULL)
+    sh("curl -fsSL https://ollama.com/install.sh | sh", stdout=subprocess.DEVNULL)
+
+
 def install_ollama(cache: Path | None) -> Path:
     """Install the Ollama binary and link cached model files. Returns the models dir."""
     models_dir = config.WORK_DIR / "ollama-models"
@@ -80,14 +87,11 @@ def install_ollama(cache: Path | None) -> Path:
         if cached_bin and cached_bin.exists():
             shutil.copy(cached_bin, "/usr/local/bin/ollama")
             os.chmod("/usr/local/bin/ollama", 0o755)
-            lib = Path("/usr/local/lib/ollama")
-            if not lib.exists():
-                lib.symlink_to(cache / "ollama" / "lib" / "ollama")
+            # Copied, not linked: /kaggle/input may not allow loading libraries from it.
+            shutil.copytree(cache / "ollama" / "lib" / "ollama", "/usr/local/lib/ollama",
+                            dirs_exist_ok=True)
         else:
-            # The Ollama installer now needs "zstd" to unpack; Kaggle machines may not have it.
-            sh("command -v zstd || apt-get install -y -qq zstd "
-               "|| (apt-get update -qq && apt-get install -y -qq zstd)", stdout=subprocess.DEVNULL)
-            sh("curl -fsSL https://ollama.com/install.sh | sh", stdout=subprocess.DEVNULL)
+            _install_ollama_online()
     if cache and (cache / "ollama" / "models").is_dir() and not models_dir.exists():
         # A tree of symlinks: instant, and nothing is copied off the read-only input.
         sh(f"cp -rs '{cache / 'ollama' / 'models'}' '{models_dir}'")
@@ -118,6 +122,24 @@ def start_ollama(models_dir: Path | None = None) -> None:
         except subprocess.CalledProcessError:
             time.sleep(1)
     raise RuntimeError("Ollama did not start. See /tmp/pva/ollama.log")
+
+
+def ollama_log_tail(lines: int = 25) -> str:
+    """Last lines of Ollama's own log (server messages only, no conversations)."""
+    try:
+        return "\n".join((config.WORK_DIR / "ollama.log").read_text(errors="ignore")
+                         .splitlines()[-lines:])
+    except OSError:
+        return "(no Ollama log)"
+
+
+def reinstall_ollama_online() -> None:
+    """Fallback when the cached Ollama doesn't work: fresh install, then restart."""
+    subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True)
+    shutil.rmtree("/usr/local/lib/ollama", ignore_errors=True)
+    Path("/usr/local/bin/ollama").unlink(missing_ok=True)
+    _install_ollama_online()
+    start_ollama()
 
 
 def ensure_llm() -> str:

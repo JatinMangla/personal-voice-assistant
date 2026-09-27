@@ -89,9 +89,18 @@ def run() -> None:
         tts.synthesize("Hello.", lang)
     import numpy as np
     list(stt.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
+    def warm_up_llm():
+        for model in picker.in_use():
+            "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model))
+
     t = time.time()
-    for model in picker.in_use():
-        "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model))
+    try:
+        warm_up_llm()
+    except Exception as e:
+        print(f"[setup] LLM test failed: {e}\n[setup] Ollama log:\n{setup_env.ollama_log_tail()}")
+        print("[setup] reinstalling Ollama from the internet and trying once more")
+        setup_env.reinstall_ollama_online()
+        warm_up_llm()
     print(f"[setup] LLM warm-up done in {time.time() - t:.1f}s")
 
     # --- web app + tunnel ---------------------------------------------------------
