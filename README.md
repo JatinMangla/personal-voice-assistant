@@ -106,9 +106,42 @@ Copy the printed key. **Save it in your password manager.** If you lose it, the 
 
 ---
 
+## One-tap "Start Jarvis" button (recommended, 10 minutes once)
+
+After 10 quiet minutes Jarvis shuts down, and the link shows **ERR_NGROK_3200** ("offline"). This button starts it again from your phone:
+- No Kaggle editor is opened, so no GPU time is wasted.
+- It always uses your latest uploaded code.
+- If Jarvis is already running, it does nothing.
+
+It uses GitHub Actions: free for private repos, and each start takes under a minute of the 2,000 free minutes/month.
+
+1. **GitHub account:** sign up free at <https://github.com>, and **turn on two-factor authentication** (Settings → Password and authentication).
+2. **Private repo:** <https://github.com/new> → name `personal-voice-assistant` → **Private** → don't add a README → **Create repository**.
+3. **Upload this project** (PowerShell, in this folder; replace `<you>` with your GitHub username):
+   ```
+   git remote add origin https://github.com/<you>/personal-voice-assistant.git
+   git push -u origin main
+   ```
+   A browser window asks you to sign in to GitHub the first time. Your secrets are **not** in the project (`.gitignore` keeps keys and zips out).
+4. **Secrets on GitHub:** repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   - `KAGGLE_USERNAME`: your Kaggle username
+   - `KAGGLE_API_TOKEN`: your Kaggle API token
+5. **Check the notebook name:** open Jarvis on Kaggle and look at the address, `kaggle.com/code/<username>/<name>`. If `<name>` is not `jarvis`, go to the same GitHub page → **Variables** tab → **New repository variable** `JARVIS_NOTEBOOK` = that name.
+6. **Use it:** GitHub app or github.com → your repo → **Actions → Start Jarvis → Run workflow → Run workflow**.
+   - Bookmark `https://github.com/<you>/personal-voice-assistant/actions/workflows/start-jarvis.yml` on your phone.
+   - About 4–5 minutes later, open your Jarvis link.
+
+If the first start fails with `Missing secret`, open the Jarvis editor once → **Add-ons → Secrets**, check all 6 switches are on, stop the session, and press the button again.
+
+From a laptop you can do the same with `python scripts/start_jarvis.py` (needs `pip install kaggle` and the two values as environment variables).
+
+**Security note:** your Kaggle token can start notebooks that hold your secrets, so protect the GitHub account like your Kaggle account: two-factor authentication on, and keep the repo private.
+
+---
+
 ## Daily use
 
-1. Open the assistant notebook on Kaggle (works in the phone browser too) → **Save Version → Save & Run All**.
+1. Tap your **Start Jarvis** bookmark → **Run workflow** (see above). Without the button: open the assistant notebook on Kaggle → **Save Version → Save & Run All**, then stop the editor session.
 2. Wait about 1–2 minutes, then open your bookmark. If it says "offline", it is still starting: tap the mic a bit later to reconnect.
 3. **Tap the mic and speak.** It stops listening when you pause, then answers. Tap while it's speaking to interrupt.
 4. When you're done, just leave it. After 10 quiet minutes it saves and shuts down, and the GPU is freed.
@@ -136,7 +169,7 @@ The page shows minutes used today and when memory was last saved.
 | Someone reads the notebook logs | **Yes.** Conversations are never printed. |
 | Internet search leaking personal data | **Yes.** Only the short search words the assistant picks are sent to the search engine; never your memory. Web results are treated as untrusted text and can't trigger any action. Set `WEB_SEARCH = False` in `src/config.py` to turn internet off. |
 | "Forget" leaving traces | **Mostly.** Deleted rows are zeroed in the database and old dataset versions are deleted. |
-| Your Google/Kaggle account is hacked | **No.** The key sits in Kaggle Secrets. That's why 2-step verification is essential. |
+| Your Google/Kaggle/GitHub account is hacked | **No.** The key sits in Kaggle Secrets, and the Kaggle token (also in GitHub if you use the Start button) can run notebooks that use it. That's why 2-step verification on all three is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |
 
 Why facts are not "trained into the model": a model file can be made to repeat what it was trained on, and a fact can't be removed from it. Encrypted memory is safer, can be deleted, and is recalled more accurately.
