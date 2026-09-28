@@ -139,6 +139,11 @@ node --check src/static/sw.js                  # and the <script> of index.html
     browser's automatic gain, so speech starts quiet: lower silence thresholds in the page,
     `stt.normalize()` boosts soft audio (≤ 30x), and **Whisper mode** (🤫 button, `X-Quiet: 1`)
     turns off browser noise suppression and uses a softer Silero VAD.
+20. The Start button once went green but started nothing: `kaggle kernels status` said
+    RUNNING (an open editor session or a stuck older run counts), so the script skipped the
+    push. Now it also checks the ngrok link (offline = `ngrok-error-code` header) and fails
+    red with advice; the workflow has a `force` checkbox. `main._startup_guard` stops any run
+    not ready within `STARTUP_TIMEOUT_MIN` (20) so a hang can't burn GPU hours.
 19. Memory safety: if a start treated an existing memory as "first run" and then `datasets
     create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
     memory must never replace the real one).

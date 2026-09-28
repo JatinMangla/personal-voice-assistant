@@ -82,7 +82,7 @@ def _install_ollama_online() -> None:
     for cmd in ("command -v zstd || apt-get install -y -qq zstd "
                 "|| (apt-get update -qq && apt-get install -y -qq zstd)",
                 "curl -fsSL https://ollama.com/install.sh | sh"):
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=6 * 60)
         if result.returncode != 0:
             raise RuntimeError(f"Ollama install failed: {result.stderr.strip()[-300:]}")
 
@@ -195,7 +195,11 @@ def reinstall_ollama_online() -> None:
 
 def _pull(model: str) -> bool:
     env = {**os.environ, "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://")}
-    return subprocess.run(["ollama", "pull", model], env=env, capture_output=True).returncode == 0
+    try:  # a hanging download must not block the start forever
+        return subprocess.run(["ollama", "pull", model], env=env, capture_output=True,
+                              timeout=12 * 60).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
 
 
 def ensure_llm(cache: Path | None = None, models_dir: Path | None = None) -> str:

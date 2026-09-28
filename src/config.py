@@ -118,6 +118,8 @@ MODELS_MARKER = "PVA_MODELS_CACHE.json"
 # if that fails. Measured on Kaggle: the internet is fast and steady, while reading the
 # cache (/kaggle/input) varied from 48 s to 320 s for the LLM alone.
 DOWNLOAD_FIRST = True
+# If Jarvis isn't ready this long after the run starts, it stops itself (saves GPU hours).
+STARTUP_TIMEOUT_MIN = 20
 
 
 def kaggle_credentials() -> tuple[str, dict[str, str]]:

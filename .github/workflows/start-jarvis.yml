@@ -4,6 +4,11 @@ name: Start Jarvis
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Start a new run even if Kaggle says Jarvis is already running"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,4 +36,5 @@ jobs:
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           START_URL: ${{ secrets.START_URL }}
           JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
+          JARVIS_FORCE: ${{ inputs.force }}
           JARVIS_EXTRA: ${{ vars.JARVIS_EXTRA || '' }}

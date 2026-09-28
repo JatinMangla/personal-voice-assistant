@@ -1,4 +1,5 @@
 """Start everything. The notebook just calls run()."""
+import os
 import subprocess
 import threading
 import time
@@ -10,6 +11,7 @@ import config
 
 def run() -> None:
     ctx: dict = {}
+    threading.Thread(target=_startup_guard, args=(ctx,), daemon=True).start()
     try:
         _run(ctx)
     except BaseException:
@@ -18,6 +20,18 @@ def run() -> None:
         if "memory" in ctx and not ctx.get("ready"):
             _record_failed_start(ctx)
         raise
+
+
+def _startup_guard(ctx: dict) -> None:
+    """A start that hangs (e.g. a stuck download) would burn free GPU hours for up to
+    12 hours. If Jarvis isn't ready in time: record the GPU time and stop the run."""
+    time.sleep(config.STARTUP_TIMEOUT_MIN * 60)
+    if not ctx.get("ready"):
+        print(f"[setup] not ready after {config.STARTUP_TIMEOUT_MIN} min: stopping to save "
+              "GPU time. Start Jarvis again later.")
+        if "memory" in ctx:
+            _record_failed_start(ctx)
+        os._exit(1)  # ends the Kaggle run
 
 
 def _record_failed_start(ctx: dict) -> None:

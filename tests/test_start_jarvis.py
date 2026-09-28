@@ -107,10 +107,30 @@ def test_full_start_uploads_secrets_then_pushes_and_retries(env):
     assert "--delete-old-versions" in calls[2]
 
 
-def test_already_running_does_nothing(env):
+def test_already_running_and_reachable_does_nothing(env):
+    env.setattr(start_jarvis, "link_is_online", lambda domain: True)
     calls = fake_kaggle_calls(env, [(0, 'has status "KernelWorkerStatus.RUNNING"')])
     start_jarvis.main()
     assert len(calls) == 1
+
+
+def test_running_but_link_offline_turns_red_with_advice(env):
+    # e.g. an open Kaggle editor tab or a stuck run: before, this looked green.
+    env.setattr(start_jarvis, "link_is_online", lambda domain: False)
+    calls = fake_kaggle_calls(env, [(0, 'has status "KernelWorkerStatus.RUNNING"')])
+    with pytest.raises(SystemExit, match="NOTHING was started"):
+        start_jarvis.main()
+    assert len(calls) == 1
+
+
+def test_force_starts_even_if_kaggle_says_running(env):
+    env.setenv("JARVIS_FORCE", "true")
+    calls = fake_kaggle_calls(env, [
+        (0, 'has status "KernelWorkerStatus.RUNNING"'),
+        (0, "ready"), (0, "Dataset version is being created."), (0, "ready"),
+        (0, "Kernel version 13 successfully pushed.")])
+    start_jarvis.main()
+    assert calls[-1][:2] == ("kernels", "push")
 
 
 def test_push_error_text_counts_as_failure():

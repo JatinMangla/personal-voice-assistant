@@ -105,6 +105,31 @@ def is_running(status_output: str) -> bool:
     return "running" in text or "queued" in text
 
 
+def link_is_online(domain: str) -> bool | None:
+    """Does the Jarvis address answer? None if unknown (no domain / network problem).
+    ngrok marks "nothing is connected" answers with an ngrok-error-code header."""
+    import urllib.error
+    import urllib.request
+    domain = domain.removeprefix("https://").removeprefix("http://").strip("/")
+    if not domain:
+        return None
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None  # a redirect (to the Google sign-in) already means "online"
+
+    opener = urllib.request.build_opener(NoRedirect)
+    request = urllib.request.Request(f"https://{domain}/",
+                                     headers={"ngrok-skip-browser-warning": "1"})
+    try:
+        with opener.open(request, timeout=15) as resp:
+            return not resp.headers.get("ngrok-error-code")
+    except urllib.error.HTTPError as e:
+        return not e.headers.get("ngrok-error-code")
+    except OSError:
+        return None
+
+
 def push_ok(returncode: int, output: str) -> bool:
     """The kaggle tool can print an error but still exit with 0."""
     text = output.lower()
@@ -149,9 +174,20 @@ def main() -> None:
     kernel = f"{s['user']}/{s['notebook']}"
 
     status = kaggle("kernels", "status", kernel)
-    if status.returncode == 0 and is_running(status.stdout):
-        print(f"Jarvis is already running ({status.stdout.strip()}). Open your link.")
-        return
+    print(f"Kaggle status of {kernel}: {(status.stdout or status.stderr).strip()}")
+    force = os.environ.get("JARVIS_FORCE", "").lower() in ("1", "true", "yes")
+    if status.returncode == 0 and is_running(status.stdout) and not force:
+        online = link_is_online(secrets.get("NGROK_DOMAIN", ""))
+        if online:
+            print("Jarvis is already running and your link works. Open it.")
+            return
+        sys.exit(
+            "Kaggle says Jarvis is running or queued, but your link is not online, so NOTHING "
+            "was started.\n"
+            "- If you started it in the last 5 minutes: it is still starting; wait.\n"
+            "- If a Kaggle editor tab of Jarvis is open: stop that session (power icon), close "
+            "the tab, and press Start again.\n"
+            "- Otherwise an older run is stuck: press 'Run workflow' again with 'force' ticked.")
 
     run_key = upload_secrets(s["user"], secrets)
     print("Encrypted secrets uploaded.")
