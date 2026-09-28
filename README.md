@@ -136,7 +136,7 @@ It uses GitHub Actions: free for private repos, and each start takes under a min
 
 If the first start fails with `Missing secret`, open the Jarvis editor once → **Add-ons → Secrets**, check all 6 switches are on, stop the session, and press the button again.
 
-7. **Start button inside the app:** add one more Kaggle secret to Jarvis, `START_URL` = `https://github.com/<you>/personal-voice-assistant/actions/workflows/start-jarvis.yml`. From then on, the Jarvis app shows a green **▶ Start Jarvis** button whenever Jarvis is off.
+7. **Start button inside the app:** add one more Kaggle secret to Jarvis, `START_URL` = `https://github.com/<you>/personal-voice-assistant/actions/workflows/start-jarvis.yml`. From then on, the Jarvis app shows a green **▶ Start** button (right of the mic) whenever Jarvis is off.
 
 **Code updates are automatic too.** Once the repo is on GitHub, every `git push` that changes `src/` uploads the code to Kaggle as a new `assistant-code` version (the "Update code on Kaggle" action, which takes about a minute). The next Start uses it, so you never upload the dataset by hand again.
 
@@ -149,7 +149,7 @@ Open your Jarvis link once while Jarvis is running, and sign in. Then:
 - **iPhone (Safari):** Share → **Add to Home Screen**.
 - **Laptop (Chrome/Edge):** the install icon in the address bar.
 
-It opens full screen with its own icon. When Jarvis is off, the app still opens and shows **Jarvis is off** plus the **▶ Start Jarvis** button, instead of ngrok's ERR_NGROK_3200 page.
+It opens full screen with its own icon. When Jarvis is off, the app still opens and shows **Jarvis is off** plus the **▶ Start** button, instead of ngrok's ERR_NGROK_3200 page.
 
 **Speaker and Bluetooth:** the mic is switched off the moment you stop talking, so replies play as normal media: through the **loudspeaker**, or your Bluetooth headphones/car in full music quality. While you talk, Bluetooth may briefly switch to its headset microphone, which is normal.
 

@@ -147,6 +147,10 @@ node --check src/static/sw.js                  # and the <script> of index.html
     push. Now it also checks the ngrok link (offline = `ngrok-error-code` header) and fails
     red with advice; the workflow has a `force` checkbox. `main._startup_guard` stops any run
     not ready within `STARTUP_TIMEOUT_MIN` (20) so a hang can't burn GPU hours.
+24. UI shell: `html, body { overflow: hidden }` + `main { position: fixed; inset: 0 }`, and
+    only `#log` scrolls; `100vh`/`100dvh` caused a body scrollbar on some phones/PWA.
+    Breakpoints: <=360px (small phones), max-height 520px (landscape: limits hidden),
+    >=768px (tablet/laptop). The in-app start link is labelled "▶ Start" (owner's wish).
 21. Earpiece again "sometimes": `getUserMedia` with `echoCancellation: true` puts phones in
     call mode (earpiece, Bluetooth HFP). Jarvis never listens while speaking, so AEC is off;
     playback waits 600 ms after the mic is released. Media audio then follows the phone:
