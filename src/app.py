@@ -167,7 +167,9 @@ class Assistant:
                     tools.cancel()
                     reply = phrases["cancelled"]
                 yield from self._speak(reply, lang)
-                turn_id = self.memory.add_turn(text, reply, lang, now)
+                # In the history (so the model knows it happened), but no 👍/👎: a fixed
+                # "Done." is no example of the user's preferred style for fine-tuning.
+                self.memory.add_turn(text, reply, lang, now)
             elif command:
                 action, content = command
                 if action == "remember":

@@ -280,7 +280,9 @@ class Memory:
         by_meaning = [r[0] for r in sorted(
             others, key=lambda r: -float(np.dot(q, _from_blob(r[4]))) if r[4] else 1.0)]
         allowed = {r[0] for r in others}
-        by_words = [fid for fid in self._keyword_ids("facts_fts", hints.terms, 50) if fid in allowed]
+        with self.lock:
+            keyword_hits = self._keyword_ids("facts_fts", hints.terms, 50)
+        by_words = [fid for fid in keyword_hits if fid in allowed]
         in_range = [r[0] for r in reversed(others) if _in_range(r[3], hints.date_range)]
         score = rrf(by_meaning, by_words, in_range)
         others.sort(key=lambda r: (r[2] in hints.categories, r[2] in preferred_categories,
@@ -400,7 +402,8 @@ class Memory:
 
     def _keyword_ids(self, table: str, terms: list[str], limit: int,
                      where: str = "", params: tuple = ()) -> list[int]:
-        """Row ids ranked by BM25 for the distinctive words among `terms`."""
+        """Row ids ranked by BM25 for the distinctive words among `terms`.
+        Call with self.lock held (one SQLite connection is shared by several threads)."""
         if not self.keyword_index or not terms:
             return []
         total = self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
