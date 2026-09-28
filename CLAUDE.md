@@ -3,6 +3,7 @@
 Read this first. It is the handover for any Claude Code session working on this repo.
 The full history (every problem, fix, measurement) is in [docs/PROJECT_LOG.md](docs/PROJECT_LOG.md);
 the user-facing guide is [README.md](README.md); the original plan review is [docs/PLAN.md](docs/PLAN.md);
+**what to do next** is in [docs/FUTURE_PLANS.md](docs/FUTURE_PLANS.md);
 memory retrieval research and the chosen direction (hybrid SQLite: FTS5 + vectors + RRF +
 date/category filters; later time-summary tree + split storage) is [docs/MEMORY_RESEARCH.md](docs/MEMORY_RESEARCH.md).
 
