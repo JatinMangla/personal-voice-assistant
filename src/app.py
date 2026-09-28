@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 import config
+import digest
 import learn
 import llm
 import tools
@@ -113,6 +114,7 @@ class Assistant:
         # never stored.
         self.pending_screen: tuple[bytes, float] | None = None
         self.backlearn_stopped = False
+        self.digest_stopped = False
         self.last_reflect = time.time()
         self.learn_thread: threading.Thread | None = None
         self.backlearn_count = [0, 0]  # old conversations read, facts learned
@@ -284,6 +286,19 @@ class Assistant:
         self.backlearn_count[0] += 1
         return True
 
+    def digest_one(self) -> bool:
+        """Write ONE day/week/month summary of old conversations (while you're quiet).
+        False when all are written (or the LLM is busy: tried again next session)."""
+        if self.digest_stopped or not config.LEARN_FROM_CHAT:
+            return False
+        try:
+            if digest.digest_one(self.memory, now_ist()):
+                return True
+        except Exception as e:
+            print(f"[digest] paused: {type(e).__name__}")
+        self.digest_stopped = True
+        return False
+
     def _speak(self, sentence: str, lang: str, ignore_errors: bool = False):
         spoken = _URL.sub("", sentence).strip()  # links are shown, never read out
         if not spoken:
@@ -405,7 +420,7 @@ class Assistant:
             learning = self.learn_thread is not None and self.learn_thread.is_alive()
             if (not self.turn_lock.locked() and not learning and self.state != "closing"
                     and self.timer.idle_seconds(now) >= config.BACKLEARN_AFTER_IDLE_SEC):
-                if not self.backlearn_one() and \
+                if not self.backlearn_one() and not self.digest_one() and \
                         time.time() - self.last_reflect >= config.REFLECT_EVERY_MIN * 60:
                     self.reflect()
 

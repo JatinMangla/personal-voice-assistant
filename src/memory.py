@@ -19,6 +19,7 @@ from datetime import date, datetime
 import numpy as np
 
 import config
+import digest
 import query_hints
 
 SCHEMA = """
@@ -148,7 +149,7 @@ class Memory:
             self.conn.deserialize(data)
         # Overwrite deleted rows with zeros, so "forget" leaves no trace in the file.
         self.conn.execute("PRAGMA secure_delete = ON")
-        self.conn.executescript(SCHEMA)
+        self.conn.executescript(SCHEMA + digest.SCHEMA)
         self._add_column("turns", "model", "TEXT")      # Phase 5: which LLM replied
         self._add_column("turns", "learned", "INTEGER DEFAULT 0")  # facts extracted yet?
         self._add_column("turns", "reflected", "INTEGER DEFAULT 0")  # patterns looked for?
@@ -356,9 +357,11 @@ class Memory:
                               if float(np.dot(best_emb, e)) >= config.LEARN_DUPLICATE_SIMILARITY]
                     self.conn.executemany("DELETE FROM facts WHERE id = ?", doomed)
             vec = self._turn_vectors()
-            hits = vec.ids[vec.matrix @ q >= min_similarity] if len(vec.ids) else []
-            turn_ids = [(int(tid),) for tid in hits]
+            hit = vec.matrix @ q >= min_similarity if len(vec.ids) else np.zeros(0, dtype=bool)
+            turn_ids = [(int(tid),) for tid in vec.ids[hit]]
             self.conn.executemany("DELETE FROM turns WHERE id = ?", turn_ids)
+            # Summaries of those days may mention it too: they are written again without it.
+            digest.drop_for_days(self, set(vec.days[hit].tolist()))
             self.conn.commit()
             if fact_text or turn_ids:
                 self.dirty = True
@@ -467,7 +470,7 @@ class Memory:
             chosen = sorted(fused, key=fused.get, reverse=True)[:k]
             if date_only:
                 chosen.sort()  # that time's conversations in the order they happened
-            out = []
+            out: list[str] = []
             for kind, row_id in chosen:
                 if kind == "f":
                     row = self.conn.execute("SELECT text FROM facts WHERE id = ?",
@@ -478,6 +481,8 @@ class Memory:
                         "SELECT ts, user_text, reply FROM turns WHERE id = ?", (row_id,)).fetchone()
                     out.append(f"On {ts[:10]} user said: {_short(user)} | "
                                f"you replied: {_short(reply)}")
+        if date_only:  # a question about a period: its summaries first
+            out = digest.for_range(self, *hints.date_range) + out
         return out
 
     def recall(self, query: str, now: datetime,
