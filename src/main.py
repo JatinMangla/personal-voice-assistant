@@ -102,6 +102,11 @@ def _run(ctx: dict) -> None:
     if config.WEB_SEARCH:  # before the LLM warms up in the background
         import websearch
         websearch.register()
+    import reminders as reminders_module  # reminder tools too (they work without internet)
+    ntfy_topic = config.get_secret("NTFY_TOPIC", required=False)
+    push = reminders_module.Push(ntfy_topic, config.NTFY_SERVER) if ntfy_topic else None
+    reminders = reminders_module.Reminders(memory, push)
+    reminders_module.register(reminders, lambda: datetime.now(ZoneInfo(config.TIMEZONE)))
 
     # The LLM downloads, loads (GPU 0) and warms up in the background ...
     paths, llm_job = setup_env.prepare()
@@ -173,7 +178,11 @@ def _run(ctx: dict) -> None:
 
     # --- web app + tunnel ---------------------------------------------------------
     assistant = Assistant(stt, tts, memory, store, timer, restart_ollama=setup_env.start_ollama,
-                          picker=picker)
+                          picker=picker, reminders=reminders)
+    pending = len(reminders.pending())
+    pushed = reminders.schedule_pushes(now_ist())  # the next 3 days, if ntfy is set up
+    print(f"[reminders] {pending} pending" + (f", {pushed} phone notification(s) scheduled"
+                                              if push else ""))
     gate = None if allowed_emails else PasswordGate(password, key)
     server = uvicorn.Server(uvicorn.Config(create_app(assistant, gate), host=config.APP_HOST,
                                            port=config.APP_PORT, log_level="warning",

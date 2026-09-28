@@ -35,6 +35,7 @@ jobs:
           ALLOWED_EMAIL: ${{ secrets.ALLOWED_EMAIL }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           START_URL: ${{ secrets.START_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
           JARVIS_FORCE: ${{ inputs.force }}
           JARVIS_EXTRA: ${{ vars.JARVIS_EXTRA || '' }}

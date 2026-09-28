@@ -150,9 +150,10 @@ def start_ollama(models_dir: Path | None = None) -> None:
            # 2 slots: the fact-learning call after a reply doesn't wipe the chat's
            # reusable prompt, so the next question starts faster.
            "OLLAMA_NUM_PARALLEL": "2",
-           # Flash attention: less GPU memory for the 8k context and a faster prompt
-           # step (supported on the T4); models that can't use it simply ignore it.
-           "OLLAMA_FLASH_ATTENTION": "1",
+           # Off by default: Ollama enables it itself only on Ampere+ GPUs, and on
+           # older cards like the T4 it can be slower. Try it via config and compare
+           # the [turn] speed lines.
+           "OLLAMA_FLASH_ATTENTION": "1" if config.OLLAMA_FLASH_ATTENTION else "0",
            "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://")}
     subprocess.Popen(["ollama", "serve"], env=env,
                      stdout=open(config.WORK_DIR / "ollama.log", "a"), stderr=subprocess.STDOUT)

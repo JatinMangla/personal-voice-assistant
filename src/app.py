@@ -102,8 +102,10 @@ def _line(**event) -> bytes:
 
 
 class Assistant:
-    def __init__(self, stt, tts, memory, store, timer, restart_ollama=None, picker=None):
+    def __init__(self, stt, tts, memory, store, timer, restart_ollama=None, picker=None,
+                 reminders=None):
         self.stt, self.tts, self.memory, self.store, self.timer = stt, tts, memory, store, timer
+        self.reminders = reminders  # reminders.Reminders, or None
         self.restart_ollama = restart_ollama
         self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
         self.start_url: str | None = None  # optional START_URL secret
@@ -195,6 +197,8 @@ class Assistant:
 
             while not self.notices.empty():  # free-plan warnings, spoken once each
                 yield from self._speak(notice_text(self.notices.get(), lang), lang)
+            for sentence in self._due_reminders(lang, now):  # once per session each
+                yield from self._speak(sentence, lang)
             yield _line(type="done", heard=True, turn_id=turn_id)
         except Exception as e:
             print(f"[turn] error: {type(e).__name__}: {str(e)[:200]}")
@@ -203,6 +207,17 @@ class Assistant:
             yield _line(type="done", heard=True, error=True)
         finally:
             self.timer.touch(now_ist())
+
+    def _due_reminders(self, lang: str, now: datetime) -> list[str]:
+        """Jarvis can't ring while it's off, so due and overdue reminders are said after
+        the first reply of a session."""
+        if not self.reminders:
+            return []
+        rows = self.reminders.to_announce(now)
+        if not rows:
+            return []
+        items = "; ".join(r["text"] for r in rows)
+        return [f"रिमाइंडर: {items}।" if lang == "hi" else f"Reminder: {items}."]
 
     def _take_screen(self) -> str | None:
         """The screen snapshot sent for this question (base64), if fresh; used once."""
@@ -216,7 +231,9 @@ class Assistant:
         history = self.memory.recent_turns(config.RECENT_TURNS)
         facts, related = self.memory.recall(text, now, exclude_recent_turns=config.RECENT_TURNS)
         usage = usage_summary(current_meters(self.memory, now), now, config.STOP_AT)
-        messages = llm.build_messages(text, lang, facts, related, history, now, screen, usage)
+        reminders = self.reminders.prompt_summary(now) if self.reminders else None
+        messages = llm.build_messages(text, lang, facts, related, history, now, screen, usage,
+                                      reminders)
         chunker = llm.SentenceChunker()
         for piece in llm.stream_reply(messages, model):
             yield from chunker.feed(piece)
@@ -574,6 +591,16 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
         except (KeyError, TypeError, ValueError):
             return JSONResponse({"error": "bad rating"}, status_code=400)
         return {"ok": ok}
+
+    @app.get("/api/reminders")
+    def reminders():
+        """Due and upcoming reminders, shown as notes when the page connects."""
+        if not assistant.reminders:
+            return {"due": [], "pending": 0}
+        now = now_ist()
+        due = assistant.reminders.due_soon(now)
+        return {"due": [{"text": r["text"], "due": r["due"]} for r in due],
+                "pending": len(assistant.reminders.pending())}
 
     @app.get("/api/goodbye")
     def goodbye():

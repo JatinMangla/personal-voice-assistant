@@ -644,7 +644,22 @@ async function reconnect() {
   closed = false; goodbyePlayed = false;
   setState("thinking", "Connecting…");
   await poll();
-  if (!offline) { setState("ready", "Tap to talk"); ping(); schedulePoll(); }
+  if (!offline) { setState("ready", "Tap to talk"); ping(); schedulePoll(); showDueReminders(); }
+}
+
+// Reminders that are due (Jarvis can't ring while it's off, so they show up here).
+let remindersShown = false;
+async function showDueReminders() {
+  if (remindersShown) return;
+  try {
+    const r = await fetch("api/reminders", { headers: HEADERS });
+    if (!r.ok) return;
+    remindersShown = true;
+    for (const d of (await r.json()).due) {
+      const when = d.due ? new Date(d.due).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+      addNote("⏰ " + d.text + (when ? " (" + when + ")" : ""));
+    }
+  } catch (e) {}
 }
 reconnect();
 </script>

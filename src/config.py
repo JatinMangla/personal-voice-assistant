@@ -14,7 +14,8 @@ ABOUT_ASSISTANT = (
     "user starts you, and you switch off after 10 minutes without use. You DO remember the "
     "user across sessions: facts they told you (listed below, when you know any) and related "
     "earlier conversations, kept in encrypted memory. You can search the internet only when a search "
-    "tool is available. You cannot make calls, send messages, set alarms or reminders, or "
+    "tool is available. You can keep reminders, to-dos and bills with your reminder tools, but "
+    "you cannot ring an alarm while switched off. You cannot make calls, send messages, or "
     "control devices unless a tool for it is available."
 )
 TIMEZONE = "Asia/Kolkata"
@@ -27,6 +28,9 @@ LLM_FALLBACK_MODEL = "qwen3:8b"
 # model (~40 s). 8192 leaves room for a screen snapshot.
 LLM_CONTEXT_TOKENS = 8192
 LLM_MAX_REPLY_TOKENS = 300
+# Experiment switch (default off): flash attention on the T4. Compare the "prompt ... in"
+# and "tokens/s" numbers of the [turn] lines with it on and off before keeping it.
+OLLAMA_FLASH_ATTENTION = False
 
 # Phase 5 fine-tuning (notebooks/finetune.ipynb). Qwen3-8B, not Qwen3.5: a tuned
 # Qwen3.5 cannot currently be loaded into Ollama (its vision part is a separate file).
@@ -97,6 +101,12 @@ DELETE_OLD_DATASET_VERSIONS = True  # so "forget" also removes old copies
 # "hot" file plus monthly archives (docs/FUTURE_PLANS.md, section 2); the log says when.
 SPLIT_STORAGE_AT_MB = 50
 SPLIT_STORAGE_AT_TURNS = 20_000
+
+# --- Reminders (reminders.py) ---------------------------------------------------------
+# Optional phone notifications at the due time via ntfy (free): set the NTFY_TOPIC secret
+# to a long random name and subscribe to it in the ntfy web app (ntfy.sh/app) or app.
+NTFY_SERVER = "https://ntfy.sh"
+NTFY_INCLUDE_TEXT = False  # False: the notification says only "You have a reminder"
 
 # --- Session ---------------------------------------------------------------------
 IDLE_TIMEOUT_MIN = 10
