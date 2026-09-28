@@ -46,10 +46,34 @@
   .bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border);
     border-bottom-left-radius: 4px; }
   .hint { color: var(--muted); text-align: center; font-size: 14px; margin: auto 0; }
-  .links { align-self: flex-start; display: flex; flex-direction: column; gap: 6px; max-width: 88%; }
-  .links a { display: block; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border);
-    background: var(--card); color: var(--accent); text-decoration: none; overflow-wrap: anywhere; }
-  .links a small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  /* link preview cards (like WhatsApp) */
+  .links { align-self: flex-start; display: flex; flex-direction: column; gap: 8px; width: min(100%, 420px); }
+  .card { display: flex; gap: 10px; align-items: stretch; border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg); text-decoration: none; }
+  .card .thumb { width: 96px; min-height: 72px; object-fit: cover; flex: none; background: var(--border); }
+  .card .body { padding: 8px 10px 8px 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .card:not(:has(.thumb)) .body { padding-left: 12px; }
+  .card .site { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card .title { font-size: 14px; font-weight: 600; color: var(--accent); overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .card .snippet { font-size: 12px; color: var(--muted); overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .card .price { align-self: flex-start; font-size: 13px; font-weight: 700; color: #fff;
+    background: var(--speak); border-radius: 6px; padding: 1px 7px; margin-top: 2px; }
+  .card.video.top { flex-direction: column; gap: 0; }
+  .card.video.top .thumb { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+  .card.video.top .body { padding: 8px 12px; }
+  .play { align-self: flex-start; margin-top: 6px; padding: 6px 14px; border-radius: 999px; font-weight: 600;
+    background: #dc2626; color: #fff; font-size: 14px; }
+  /* header buttons, screen sharing */
+  .actions { display: flex; gap: 6px; align-items: center; }
+  .chip { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg); }
+  .chip.on { background: var(--listen); border-color: var(--listen); color: #fff; }
+  .chip[hidden] { display: none; }
+  #screenPreview { align-self: center; max-height: 90px; max-width: 160px; border-radius: 8px;
+    border: 2px solid var(--listen); margin-top: 10px; }
+  #screenPreview[hidden] { display: none; }
   .note { align-self: flex-start; max-width: 88%; font-size: 13px; color: var(--muted); }
   .rate { align-self: flex-start; display: flex; gap: 6px; margin-top: -4px; }
   .rate button { font-size: 15px; line-height: 1; padding: 6px 10px; border-radius: 999px; cursor: pointer;
@@ -78,10 +102,15 @@
 <main>
   <header>
     <h1 id="name">Jarvis</h1>
-    <div class="meta"><div id="saved">not saved yet</div></div>
+    <div class="actions">
+      <button id="share" class="chip" hidden title="Jarvis sees a snapshot of your screen each time you ask (laptop/desktop only)">🖥 Share screen</button>
+      <button id="clear" class="chip" title="Clears this screen only; Jarvis's memory is kept">Clear</button>
+    </div>
   </header>
+  <div class="meta"><div id="saved">not saved yet</div></div>
   <div class="limits" id="limits" title="Free limits: a warning at 90%, automatic stop at 99%, so it never costs anything"></div>
   <div id="warn" role="alert"></div>
+  <video id="screenPreview" muted playsinline hidden aria-label="Your shared screen"></video>
   <div id="log" aria-live="polite"><p class="hint" id="hint">Tap the mic and speak. It stops listening when you pause.</p></div>
   <div class="controls">
     <button id="mic" aria-label="Tap to talk">
@@ -236,6 +265,15 @@ async function sendTurn(blob) {
   setState("thinking", "Thinking…");
   let youMsg = null, botMsg = null;
   try {
+    let usedScreen = false;
+    if (screenStream) {  // screen sharing: send a snapshot for this question first
+      const shot = await snapshot();
+      if (shot) {
+        const r = await fetch("api/screen", { method: "POST", body: shot,
+          headers: { ...HEADERS, "Content-Type": "image/jpeg" } }).catch(() => null);
+        usedScreen = !!(r && r.ok);
+      }
+    }
     const res = await fetch("api/turn", { method: "POST", body: blob,
       headers: { ...HEADERS, "Content-Type": blob.type } });
     if (res.status === 409) { setState("ready", "Busy or closing. Try again in a moment."); return; }
@@ -253,7 +291,7 @@ async function sendTurn(blob) {
         if (!line.trim()) continue;
         const ev = JSON.parse(line);
         if (ev.type === "transcript") {
-          if (ev.text) youMsg = addMsg("you", ev.text);
+          if (ev.text) youMsg = addMsg("you", ev.text + (usedScreen ? "  🖥" : ""));
         } else if (ev.type === "sentence") {
           if (!botMsg) botMsg = addMsg("bot", ev.text);
           else botMsg.textContent += " " + ev.text;
@@ -285,22 +323,110 @@ $("mic").addEventListener("click", () => {
   startListening();
 });
 
-// ---------- links found on the internet (shown, never read aloud) ----------
+// ---------- links found on the internet: preview cards (never read aloud) ----------
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text) e.textContent = text;
+  return e;
+}
+
 function addLinks(links) {
-  const box = document.createElement("div");
-  box.className = "links";
+  const box = el("div", "links");
+  let firstVideo = true;
   for (const l of links) {
     if (!/^https?:\/\//i.test(l.url)) continue;  // web links only
-    const a = document.createElement("a");
-    a.href = l.url; a.target = "_blank"; a.rel = "noopener noreferrer";
-    a.textContent = l.title;
-    const small = document.createElement("small");
-    let host = ""; try { host = new URL(l.url).hostname.replace(/^www\./, ""); } catch (e) {}
-    small.textContent = [l.note, host].filter(Boolean).join(" · ");
-    a.appendChild(small);
-    box.appendChild(a);
+    const isVideo = l.kind === "video" && /^[\w-]{11}$/.test(l.video_id || "");
+    const card = el("a", "card" + (isVideo ? " video" : "") + (isVideo && firstVideo ? " top" : ""));
+    card.href = l.url; card.target = "_blank"; card.rel = "noopener noreferrer";
+    if (l.image && /^https:\/\//i.test(l.image)) {
+      const img = el("img", "thumb");
+      img.src = l.image; img.alt = ""; img.loading = "lazy"; img.referrerPolicy = "no-referrer";
+      img.onerror = () => img.remove();
+      card.appendChild(img);
+    }
+    const body = el("div", "body");
+    body.appendChild(el("div", "site", [l.site, l.kind === "product" ? "" : l.note].filter(Boolean).join(" · ")));
+    body.appendChild(el("div", "title", l.title));
+    if (l.price) body.appendChild(el("span", "price", l.price));
+    if (l.snippet) body.appendChild(el("div", "snippet", l.snippet));
+    if (isVideo && firstVideo) body.appendChild(el("span", "play", "▶ Play on YouTube"));
+    card.appendChild(body);
+    if (isVideo) {
+      card.addEventListener("click", (e) => { e.preventDefault(); openVideo(l.video_id); });
+      firstVideo = false;
+    }
+    box.appendChild(card);
   }
   if (box.childElementCount) { $("log").appendChild(box); $("log").scrollTop = $("log").scrollHeight; }
+}
+
+// Open a YouTube video in the YouTube app if it is installed, otherwise in the browser.
+// (A web page can't list installed apps; these links let the phone decide.)
+function openVideo(id) {
+  const web = "https://www.youtube.com/watch?v=" + id;
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua)) {
+    // Android: opens the YouTube app, or the browser fallback if the app is missing.
+    location.href = "intent://www.youtube.com/watch?v=" + id + "#Intent;scheme=https;" +
+      "package=com.google.android.youtube;S.browser_fallback_url=" + encodeURIComponent(web) + ";end";
+  } else if (/iPhone|iPad|iPod/i.test(ua)) {
+    // iPhone: try the app; if we're still here after 1.5 s, it isn't installed.
+    const fallback = setTimeout(() => { if (!document.hidden) location.href = web; }, 1500);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) clearTimeout(fallback);
+    }, { once: true });
+    location.href = "youtube://www.youtube.com/watch?v=" + id;
+  } else {
+    window.open(web, "_blank", "noopener");
+  }
+}
+
+// ---------- clear the chat on this screen (memory is not touched) ----------
+$("clear").addEventListener("click", () => {
+  $("log").replaceChildren(el("p", "hint", "Chat cleared. Jarvis still remembers everything. Tap the mic to talk."));
+  $("log").lastChild.id = "hint";
+});
+
+// ---------- screen sharing (laptop/desktop browsers; phones don't allow it) ----------
+let screenStream = null;
+const screenVideo = $("screenPreview");
+const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)
+  && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+$("share").hidden = !canShareScreen;
+
+$("share").addEventListener("click", async () => {
+  if (screenStream) { stopSharing(); return; }
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false });
+  } catch (e) { return; }  // cancelled
+  screenVideo.srcObject = screenStream;
+  screenVideo.hidden = false;
+  screenVideo.play().catch(() => {});
+  screenStream.getVideoTracks()[0].addEventListener("ended", stopSharing);  // browser's own Stop
+  $("share").textContent = "⏹ Stop sharing";
+  $("share").classList.add("on");
+  addNote("🖥 Sharing your screen: each time you ask, Jarvis looks at it once. Nothing is recorded or saved.");
+});
+
+function stopSharing() {
+  if (screenStream) screenStream.getTracks().forEach((t) => t.stop());
+  screenStream = null;
+  screenVideo.srcObject = null;
+  screenVideo.hidden = true;
+  $("share").textContent = "🖥 Share screen";
+  $("share").classList.remove("on");
+}
+
+// One snapshot of the shared screen, max 1280 px wide, as JPEG.
+async function snapshot() {
+  if (!screenStream || !screenVideo.videoWidth) return null;
+  const scale = Math.min(1, 1280 / screenVideo.videoWidth);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(screenVideo.videoWidth * scale);
+  canvas.height = Math.round(screenVideo.videoHeight * scale);
+  canvas.getContext("2d").drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.7));
 }
 
 function addNote(text) {

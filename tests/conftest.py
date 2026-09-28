@@ -27,3 +27,10 @@ class FakeEmbedder:
 @pytest.fixture
 def embedder():
     return FakeEmbedder()
+
+
+@pytest.fixture(autouse=True)
+def no_page_fetching(monkeypatch):
+    """Tests never fetch real web pages for link previews."""
+    import pages
+    monkeypatch.setattr(pages, "previews", lambda urls: [{} for _ in urls])

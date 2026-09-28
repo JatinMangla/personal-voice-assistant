@@ -150,8 +150,9 @@ def test_links_are_sent_to_the_page_but_never_spoken(embedder, monkeypatch):
                            links=[("Kesariya", "https://www.youtube.com/watch?v=BddP6PYo2gs",
                                    "YouTube · 2:53"), ("bad", "javascript:alert(1)")])
     links = next(e for e in events if e["type"] == "links")["links"]
-    assert links == [{"title": "Kesariya", "url": "https://www.youtube.com/watch?v=BddP6PYo2gs",
-                      "note": "YouTube · 2:53"}]
+    assert len(links) == 1  # the javascript: link is dropped
+    assert links[0]["url"] == "https://www.youtube.com/watch?v=BddP6PYo2gs"
+    assert links[0]["site"] == "youtube.com" and links[0]["note"] == "YouTube · 2:53"
     assert tts.spoken == ["Here it is:"]
 
 

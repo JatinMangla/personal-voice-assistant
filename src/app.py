@@ -85,6 +85,9 @@ class Assistant:
         self.restart_ollama = restart_ollama
         self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
         self.start_url: str | None = None  # optional START_URL secret
+        # Screen snapshot sent just before a question (screen sharing); used once,
+        # never stored.
+        self.pending_screen: tuple[bytes, float] | None = None
         self.budget = Budget(config.NOTIFY_AT, config.STOP_AT)
         self.notices: queue.SimpleQueue = queue.SimpleQueue()  # 90 % warnings to speak
         self.server = None  # uvicorn.Server, set by main.py
@@ -126,9 +129,10 @@ class Assistant:
                     yield from self._speak(sentence, lang)
             else:
                 model = self.picker.pick()
-                websearch.take_links()  # start this turn with no links
+                websearch.take_links(enrich=False)  # start this turn with no links
+                screen = self._take_screen()
                 reply_parts = []
-                for sentence in self._llm_sentences(text, lang, now, model):
+                for sentence in self._llm_sentences(text, lang, now, model, screen):
                     reply_parts.append(sentence)
                     yield from self._speak(sentence, lang)
                     first_audio = first_audio or time.time() - t0
@@ -138,8 +142,8 @@ class Assistant:
                 turn_id = self.memory.add_turn(text, " ".join(reply_parts), lang, now, model)
                 yield from self._learn(text, now)
                 # Timings only; never the words.
-                print(f"[turn] {lang}: heard in {heard:.1f}s, first audio at "
-                      f"{first_audio or 0:.1f}s, done at {time.time() - t0:.1f}s "
+                print(f"[turn] {lang}{' +screen' if screen else ''}: heard in {heard:.1f}s, "
+                      f"first audio at {first_audio or 0:.1f}s, done at {time.time() - t0:.1f}s "
                       f"({llm.speed_report()})")
 
             while not self.notices.empty():  # free-plan warnings, spoken once each
@@ -153,13 +157,21 @@ class Assistant:
         finally:
             self.timer.touch(now_ist())
 
-    def _llm_sentences(self, text: str, lang: str, now: datetime, model: str):
+    def _take_screen(self) -> str | None:
+        """The screen snapshot sent for this question (base64), if fresh; used once."""
+        pending, self.pending_screen = self.pending_screen, None
+        if pending and time.time() - pending[1] <= config.SCREEN_MAX_AGE_SEC:
+            return base64.b64encode(pending[0]).decode()
+        return None
+
+    def _llm_sentences(self, text: str, lang: str, now: datetime, model: str,
+                       screen: str | None = None):
         history = self.memory.recent_turns(config.RECENT_TURNS)
         related = self.memory.search(text, config.MEMORY_TOP_K, config.MEMORY_MIN_SIMILARITY,
                                      exclude_recent_turns=config.RECENT_TURNS)
         facts = self.memory.facts_for_prompt(text, config.ALL_FACTS_LIMIT,
                                              config.ALWAYS_SHOWN_CATEGORIES)
-        messages = llm.build_messages(text, lang, facts, related, history, now)
+        messages = llm.build_messages(text, lang, facts, related, history, now, screen)
         chunker = llm.SentenceChunker()
         for piece in llm.stream_reply(messages, model):
             yield from chunker.feed(piece)
@@ -423,6 +435,17 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
                 assistant.count_net(0, sent)
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+    @app.post("/api/screen")
+    async def screen(request: Request):
+        """A screenshot for the next question (screen sharing). Kept in memory only
+        until that question, never saved."""
+        image = await request.body()
+        if len(image) > config.SCREEN_MAX_BYTES or not (
+                image.startswith(b"\xff\xd8\xff") or image.startswith(b"\x89PNG")):
+            return JSONResponse({"error": "JPEG or PNG up to 3 MB only"}, status_code=400)
+        assistant.pending_screen = (image, time.time())
+        return {"ok": True}
 
     @app.post("/api/rate")
     async def rate(request: Request):

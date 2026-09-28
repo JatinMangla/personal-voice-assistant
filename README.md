@@ -175,7 +175,11 @@ The page shows minutes used today and when memory was last saved.
 | "याद रखना कि मेरी मीटिंग सोमवार को है" | Same, in Hindi |
 | "Forget that my car number…" / "…भूल जाओ" | Deletes the closest matching fact, and past chats that closely match it |
 | "Who sang Kesariya?" / "Latest India cricket score" | Searches the internet (Google first, then Bing, Brave or DuckDuckGo, then Wikipedia) and answers from the results. Free, no API key. |
-| "Give me the YouTube link of Kesariya" | Finds the video. The links appear as buttons under the reply; the voice never reads web addresses. |
+| "Play Arijit Singh's latest song" / "YouTube link of Kesariya" | Finds the video and shows a big card with a thumbnail and a red **▶ Play on YouTube** button. On Android it opens the **YouTube app** if installed, otherwise the browser; on iPhone it tries the app first. |
+| "Cheapest price of boAt Airdopes 141" | Searches shops, reads their prices, and says the cheapest. Cards show thumbnail, shop and a green price badge, cheapest first. Prices are approximate, and some shops block automatic reading. |
+| Any search | Results appear as **preview cards** (thumbnail, site, title, short text), like WhatsApp link previews. The voice never reads web addresses. |
+| **🖥 Share screen** (laptop/desktop only) | Share a window or your screen, then ask "what's this error?", "summarise this page", etc. Each time you ask, Jarvis looks at **one snapshot**; nothing is recorded or saved. Phone browsers don't allow screen sharing. |
+| **Clear** (top right) | Clears the chat on the screen only. Jarvis's memory is kept. |
 | Just mention things about yourself: "I'm allergic to peanuts", "my daughter Riya is 8" | Jarvis **learns lasting facts by itself**, with no "remember that" needed. A note "🧠 Learned: …" shows what it picked up. Health and diet facts are always in front of it, so months later a recipe with peanuts comes with a warning and a substitute. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
 | Tap 👍 / 👎 under a reply | Rates it (tap again to undo). 👍 replies are what the assistant later learns your style from (Phase 5). |

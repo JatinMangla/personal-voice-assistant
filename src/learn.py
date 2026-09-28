@@ -86,7 +86,8 @@ def _ask_llm(user_text: str, known: list[str]) -> list[dict]:
         "think": False,
         "format": SCHEMA,
         "keep_alive": "60m",
-        "options": {"temperature": 0, "num_predict": 250},
+        # same num_ctx as every other request: a different one makes Ollama reload the model
+        "options": {"temperature": 0, "num_predict": 250, "num_ctx": config.LLM_CONTEXT_TOKENS},
     })
     resp.raise_for_status()
     return json.loads(resp.json()["message"]["content"]).get("facts", [])

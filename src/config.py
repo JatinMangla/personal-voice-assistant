@@ -22,7 +22,9 @@ TIMEZONE = "Asia/Kolkata"
 # Check https://ollama.com/library for newer tags before changing.
 LLM_MODEL = os.environ.get("PVA_LLM_MODEL", "qwen3.5:9b")
 LLM_FALLBACK_MODEL = "qwen3:8b"
-LLM_CONTEXT_TOKENS = 4096
+# Same value in EVERY Ollama request: a different num_ctx makes Ollama reload the whole
+# model (~40 s). 8192 leaves room for a screen snapshot.
+LLM_CONTEXT_TOKENS = 8192
 LLM_MAX_REPLY_TOKENS = 300
 
 # Phase 5 fine-tuning (notebooks/finetune.ipynb). Qwen3-8B, not Qwen3.5: a tuned
@@ -45,6 +47,10 @@ WEB_SEARCH = True  # False = the assistant has no internet access
 SEARCH_BACKENDS = "google,bing,brave,duckduckgo"
 SEARCH_REGION = "in-en"
 SEARCH_RESULTS = 5
+
+# Screen sharing (laptop/desktop browsers): one snapshot per question, never stored.
+SCREEN_MAX_BYTES = 3_000_000
+SCREEN_MAX_AGE_SEC = 90  # a snapshot older than this is not used
 
 KOKORO_REPO = "hexgrad/Kokoro-82M"
 # language code -> (Kokoro lang_code, voice)
