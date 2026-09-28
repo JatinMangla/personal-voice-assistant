@@ -111,6 +111,7 @@ def test_home_start_end_to_end_with_fakes(embedder, monkeypatch, tmp_path):
     monkeypatch.setattr(config, "WORK_DIR", tmp_path / "work")
     monkeypatch.setattr(config, "IDLE_TIMEOUT_MIN", 0)
     monkeypatch.setattr(config, "_bundle_cache", {})
+    monkeypatch.setattr(config, "NGROK_IN_USE", True)  # main.run() changes it: restore after
     for name in ("NGROK_AUTHTOKEN", "NGROK_DOMAIN", "ALLOWED_EMAIL", "APP_PASSWORD",
                  "NTFY_TOPIC", "KAGGLE_USERNAME", "KAGGLE_API_TOKEN", "PVA_RUN_KEY"):
         monkeypatch.delenv(name, raising=False)
