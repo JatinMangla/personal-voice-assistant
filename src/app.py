@@ -19,7 +19,7 @@ import config
 import learn
 import llm
 import websearch
-from budget import Budget, Meter, current_meters, minutes_until_stop
+from budget import Budget, Meter, current_meters, describe_reset, minutes_until_stop
 from intents import parse_command
 from stt import AudioUnreadable
 
@@ -59,17 +59,21 @@ PHRASES = {
 }
 
 
-def notice_text(meter: Meter, lang: str) -> str:
+def notice_text(meter: Meter, lang: str, now: datetime | None = None) -> str:
+    """e.g. 'Heads up: 95% of today's GPU time is used. About 11 minutes left. Resets at
+    12:00 AM (midnight) India time, in 3 h 20 min.'"""
     p = PHRASES.get(lang, PHRASES["en"])
     text = p["notice"].format(pct=meter.percent, label=p["labels"][meter.name])
     left = minutes_until_stop(meter, config.STOP_AT)
-    return text + (p["notice_left"].format(left=left) if left is not None else "")
+    text += p["notice_left"].format(left=left) if left is not None else ""
+    return f"{text} {describe_reset(meter, now or now_ist(), lang)}"
 
 
-def limit_goodbye(meter: Meter, lang: str) -> str:
+def limit_goodbye(meter: Meter, lang: str, now: datetime | None = None) -> str:
     p = PHRASES.get(lang, PHRASES["en"])
     label = p["labels"][meter.name]
-    return p["bye_limit"].format(label=label[0].upper() + label[1:])
+    bye = p["bye_limit"].format(label=label[0].upper() + label[1:])
+    return f"{bye} {describe_reset(meter, now or now_ist(), lang)}"
 
 
 def now_ist() -> datetime:
@@ -261,9 +265,9 @@ class Assistant:
                           if last else None,
             "save_ok": self.save_ok,
             "poll_sec": config.STATUS_POLL_SEC,
-            "meters": [{"name": m.name, "used": m.used, "limit": m.limit, "percent": m.percent}
-                       for m in meters],
-            "warnings": [notice_text(m, "en") for m in self.budget.warnings(meters)],
+            "meters": [{"name": m.name, "used": m.used, "limit": m.limit, "percent": m.percent,
+                        "resets": describe_reset(m, now)} for m in meters],
+            "warnings": [notice_text(m, "en", now) for m in self.budget.warnings(meters)],
             "notify_pct": round(config.NOTIFY_AT * 100),
             "stop_pct": round(config.STOP_AT * 100),
             "start_url": self.start_url,  # the page's "Start Jarvis" button while offline

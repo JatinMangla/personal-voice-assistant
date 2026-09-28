@@ -39,6 +39,46 @@ def current_meters(memory, now: datetime) -> list[Meter]:
     ]
 
 
+def reset_time(meter: Meter, now: datetime) -> datetime:
+    """When the meter gives time/room back, in India time (now must be IST-aware).
+    day: at midnight. week (rolling 7 days): each midnight the oldest day drops out.
+    requests/data: on the 1st of next month."""
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    if meter.name in ("day", "week"):
+        return midnight
+    first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return (first + timedelta(days=32)).replace(day=1)
+
+
+def _in(delta: timedelta, lang: str) -> str:
+    minutes = max(0, int(delta.total_seconds() // 60))
+    days, hours, mins = minutes // 1440, minutes % 1440 // 60, minutes % 60
+    if lang == "hi":
+        if days:
+            return f"{days} दिन में"
+        return f"{hours} घंटे {mins} मिनट में" if hours else f"{mins} मिनट में"
+    if days:
+        return f"in {days} day{'s' if days > 1 else ''}"
+    return f"in {hours} h {mins} min" if hours else f"in {mins} min"
+
+
+def describe_reset(meter: Meter, now: datetime, lang: str = "en") -> str:
+    """e.g. 'Resets at 12:00 AM (midnight) India time, in 3 h 20 min.'"""
+    at = reset_time(meter, now)
+    when = _in(at - now, lang)
+    if meter.name == "day":
+        return (f"रात 12 बजे (भारतीय समय) रीसेट होगा, {when}।" if lang == "hi"
+                else f"Resets at 12:00 AM (midnight) India time, {when}.")
+    if meter.name == "week":
+        return (f"हर रात 12 बजे (भारतीय समय) सबसे पुराने दिन का समय वापस मिलता है, अगली बार {when}।"
+                if lang == "hi" else
+                f"Some time comes back every midnight (12:00 AM India time) as the oldest "
+                f"day drops out; next {when}.")
+    date = at.strftime("%d %B").lstrip("0")
+    return (f"{date} को रात 12 बजे (भारतीय समय) रीसेट होगा, {when}।" if lang == "hi"
+            else f"Resets on {date} at 12:00 AM India time, {when}.")
+
+
 def minutes_until_stop(meter: Meter, stop_at: float) -> int | None:
     """For the GPU-time meters: minutes left before the automatic stop."""
     if meter.name not in ("day", "week"):

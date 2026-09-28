@@ -51,7 +51,7 @@ def _run(ctx: dict) -> None:
     setup_env.install_basics()
 
     import crypto
-    from budget import Budget, current_meters, minutes_until_stop
+    from budget import Budget, current_meters, describe_reset, minutes_until_stop
     from memory import Memory
     from persistence import MemoryStore
     from timer import SessionTimer
@@ -89,8 +89,7 @@ def _run(ctx: dict) -> None:
     if blocked:
         print(f"\n[budget] NOT STARTING: '{blocked.name}' is at {blocked.percent}% of its free "
               f"limit (auto-stop at {config.STOP_AT:.0%}). This keeps the project free. "
-              "Day limits reset at midnight IST, week limits as old days roll off, "
-              "link limits next month.")
+              f"{describe_reset(blocked, now)}")
         store.save(memory.to_bytes())  # record this short session's GPU time
         ctx["ready"] = True  # already recorded
         return

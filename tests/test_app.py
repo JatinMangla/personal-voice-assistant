@@ -116,7 +116,9 @@ def test_warning_at_90_percent_is_shown_and_spoken_once(make):
     month = app_module.now_ist().strftime("%Y-%m")
     assistant.memory.add_net(month, 18_100, 0)  # 90.5 % of 20,000
     s = client.get("/api/status").json()
-    assert s["warnings"] == ["Heads up: 90% of this month's free link requests is used."]
+    assert len(s["warnings"]) == 1
+    assert s["warnings"][0].startswith("Heads up: 90% of this month's free link requests is used. "
+                                       "Resets on 1 ")
 
     for m in assistant.budget.new_notices(app_module.current_meters(assistant.memory, app_module.now_ist())):
         assistant.notices.put(m)  # what the watchdog does every 5 s
@@ -137,8 +139,9 @@ def test_gpu_warning_says_minutes_left(make):
     today = app_module.now_ist().date().isoformat()
     assistant.memory.add_usage(today, 240 * 60)  # 240 of 257 min
     day = meters_by_name(assistant)["day"]
-    assert app_module.notice_text(day, "en") == \
-        "Heads up: 93% of today's GPU time is used. About 14 minutes left."
+    assert app_module.notice_text(day, "en").startswith(
+        "Heads up: 93% of today's GPU time is used. About 14 minutes left. "
+        "Resets at 12:00 AM (midnight) India time, in ")
 
 
 def test_stop_at_99_percent_says_why(make, monkeypatch):
@@ -151,8 +154,9 @@ def test_stop_at_99_percent_says_why(make, monkeypatch):
     said = []
     assistant.tts.synthesize = lambda text, lang: said.append(text) or b"RIFF"
     assistant.close("limit", over)
-    assert said == ["This month's free link data is almost used up, so I'm stopping now "
-                    "to keep this free. Your memory is saved. Goodbye!"]
+    assert len(said) == 1 and said[0].startswith(
+        "This month's free link data is almost used up, so I'm stopping now "
+        "to keep this free. Your memory is saved. Goodbye! Resets on 1 ")
     assert assistant.store.saved and assistant.state == "closing"
 
 

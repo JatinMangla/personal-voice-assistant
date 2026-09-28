@@ -557,6 +557,7 @@ function renderLimits(s) {
     const div = document.createElement("div");
     div.className = "limit" + (m.percent >= s.notify_pct ? " warn" : "");
     div.textContent = `${LIMIT_LABELS[m.name]}: ${limitText(m)}`;
+    if (m.resets) div.title = m.resets;  // e.g. "Resets at 12:00 AM (midnight) India time, in 3 h 20 min."
     const bar = document.createElement("div"); bar.className = "bar";
     const fill = document.createElement("i"); fill.style.width = Math.min(100, m.percent) + "%";
     bar.appendChild(fill); div.appendChild(bar);
