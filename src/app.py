@@ -19,7 +19,8 @@ import config
 import learn
 import llm
 import websearch
-from budget import Budget, Meter, current_meters, describe_reset, minutes_until_stop
+from budget import (Budget, Meter, current_meters, describe_reset, minutes_until_stop,
+                    usage_summary)
 from intents import parse_command
 from stt import AudioUnreadable
 
@@ -186,7 +187,8 @@ class Assistant:
                                      exclude_recent_turns=config.RECENT_TURNS)
         facts = self.memory.facts_for_prompt(text, config.ALL_FACTS_LIMIT,
                                              config.ALWAYS_SHOWN_CATEGORIES)
-        messages = llm.build_messages(text, lang, facts, related, history, now, screen)
+        usage = usage_summary(current_meters(self.memory, now), now, config.STOP_AT)
+        messages = llm.build_messages(text, lang, facts, related, history, now, screen, usage)
         chunker = llm.SentenceChunker()
         for piece in llm.stream_reply(messages, model):
             yield from chunker.feed(piece)

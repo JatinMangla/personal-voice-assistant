@@ -79,6 +79,29 @@ def describe_reset(meter: Meter, now: datetime, lang: str = "en") -> str:
             else f"Resets on {date} at 12:00 AM India time, {when}.")
 
 
+def usage_summary(meters: list[Meter], now: datetime, stop_at: float) -> str:
+    """Live free-limit status for the assistant, so it can answer "how much time is left
+    today?" / "when does it reset?" correctly."""
+    m = {meter.name: meter for meter in meters}
+    parts = []
+    if "day" in m:
+        day = m["day"]
+        parts.append(f"GPU time today: {day.used / 60:.0f} of {day.limit / 60:.0f} minutes used, "
+                     f"{minutes_until_stop(day, stop_at)} minutes left before the automatic "
+                     f"stop. {describe_reset(day, now)}")
+    if "week" in m:
+        week = m["week"]
+        parts.append(f"GPU time in the last 7 days: {week.used / 3600:.1f} of "
+                     f"{week.limit / 3600:.0f} hours used "
+                     f"({minutes_until_stop(week, stop_at)} minutes left).")
+    if "requests" in m and "data" in m:
+        parts.append(f"Free link this month: {m['requests'].used:,.0f} of "
+                     f"{m['requests'].limit:,.0f} requests and {m['data'].used / 1e6:.0f} of "
+                     f"{m['data'].limit / 1e6:.0f} MB used. {describe_reset(m['requests'], now)}")
+    parts.append(f"Each session also closes after {config.IDLE_TIMEOUT_MIN} minutes without use.")
+    return " ".join(parts)
+
+
 def minutes_until_stop(meter: Meter, stop_at: float) -> int | None:
     """For the GPU-time meters: minutes left before the automatic stop."""
     if meter.name not in ("day", "week"):

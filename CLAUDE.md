@@ -147,6 +147,10 @@ node --check src/static/sw.js                  # and the <script> of index.html
     push. Now it also checks the ngrok link (offline = `ngrok-error-code` header) and fails
     red with advice; the workflow has a `force` checkbox. `main._startup_guard` stops any run
     not ready within `STARTUP_TIMEOUT_MIN` (20) so a hang can't burn GPU hours.
+25. Jarvis knows its own limits: `budget.usage_summary()` (GPU min left today, reset time
+    in IST, 7-day hours, link usage, 10-min idle rule) goes into the dynamic tail of every
+    system prompt, so "how much time is left today?" is answered from live numbers.
+    `describe_reset()` adds the reset time (midnight IST / 1st of month) to every warning.
 24. UI shell: `html, body { overflow: hidden }` + `main { position: fixed; inset: 0 }`, and
     only `#log` scrolls; `100vh`/`100dvh` caused a body scrollbar on some phones/PWA.
     Breakpoints: <=360px (small phones), max-height 520px (landscape: limits hidden),
