@@ -1,4 +1,4 @@
-﻿"""Web server tests with fake speech/LLM parts (no GPU, no Ollama)."""
+"""Web server tests with fake speech/LLM parts (no GPU, no Ollama)."""
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -17,7 +17,7 @@ class FakeSTT:
     def __init__(self, text="", lang="en"):
         self.text, self.lang = text, lang
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, quiet=False):
         return self.text, self.lang
 
 

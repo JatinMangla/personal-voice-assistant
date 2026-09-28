@@ -74,6 +74,16 @@
   #screenPreview { align-self: center; max-height: 90px; max-width: 160px; border-radius: 8px;
     border: 2px solid var(--listen); margin-top: 10px; }
   #screenPreview[hidden] { display: none; }
+  #memory { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+    background: var(--card); max-height: 45vh; overflow-y: auto; }
+  #memory[hidden] { display: none; }
+  .memhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .memhint { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+  #memList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  #memList li { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; }
+  #memList li span { flex: 1; }
+  #memList li small { color: var(--muted); font-size: 11px; display: block; }
+  #memList li button { flex: none; }
   .note { align-self: flex-start; max-width: 88%; font-size: 13px; color: var(--muted); }
   .rate { align-self: flex-start; display: flex; gap: 6px; margin-top: -4px; }
   .rate button { font-size: 15px; line-height: 1; padding: 6px 10px; border-radius: 999px; cursor: pointer;
@@ -104,6 +114,7 @@
     <h1 id="name">Jarvis</h1>
     <div class="actions">
       <button id="share" class="chip" hidden title="Jarvis sees a snapshot of your screen each time you ask (laptop/desktop only)">🖥 Share screen</button>
+      <button id="memoryBtn" class="chip" title="What Jarvis knows about you">🧠 Memory</button>
       <button id="clear" class="chip" title="Clears this screen only; Jarvis's memory is kept">Clear</button>
     </div>
   </header>
@@ -111,12 +122,20 @@
   <div class="limits" id="limits" title="Free limits: a warning at 90%, automatic stop at 99%, so it never costs anything"></div>
   <div id="warn" role="alert"></div>
   <video id="screenPreview" muted playsinline hidden aria-label="Your shared screen"></video>
+  <section id="memory" hidden aria-label="What Jarvis knows about you">
+    <div class="memhead"><strong>🧠 What Jarvis knows about you</strong>
+      <button id="memClose" class="chip" aria-label="Close">✕</button></div>
+    <p class="memhint">Learned from your conversations and "remember that…". Tap ✕ to delete one.</p>
+    <ul id="memList"></ul>
+  </section>
   <div id="log" aria-live="polite"><p class="hint" id="hint">Tap the mic and speak. It stops listening when you pause.</p></div>
   <div class="controls">
     <button id="mic" aria-label="Tap to talk">
       <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
     </button>
     <div id="status">Tap to talk</div>
+    <button id="quiet" class="chip" aria-pressed="false"
+      title="For speaking softly (e.g. at night): Jarvis listens more sensitively">🤫 Whisper</button>
     <a id="start" class="start" hidden target="_blank" rel="noopener noreferrer">▶ Start Jarvis</a>
   </div>
 </main>
@@ -206,7 +225,8 @@ async function startListening() {
   setAudioSession("play-and-record");
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      // Noise suppression can remove whispered sounds, so it is off in Whisper mode.
+      audio: { echoCancellation: true, noiseSuppression: !quietMode, autoGainControl: true } });
   } catch (e) {
     releaseMic();
     setState("ready", "Microphone blocked. Allow mic access for this site and try again.");
@@ -241,10 +261,14 @@ function watchSilence() {
     const now = performance.now(), dt = now - last; last = now;
     const elapsed = now - started;
     if (elapsed < 300) { noise = Math.max(noise, rms); return; }   // learn background noise
-    const loud = rms > Math.max(0.015, noise * 2.5);
+    // What counts as speech: a bit above the background noise. The mic is opened fresh
+    // for every question, so its automatic gain starts low: keep the bar low too.
+    // Whisper mode: even lower bar, and a longer pause before it stops listening.
+    const loud = quietMode ? rms > Math.max(0.004, noise * 1.8) : rms > Math.max(0.008, noise * 2.2);
     if (loud) { speechMs += dt; silenceMs = 0; } else { silenceMs += dt; }
-    if (speechMs > 250) recorder.heard = true;
-    if ((recorder.heard && silenceMs > 1200) || (!recorder.heard && elapsed > 7000) || elapsed > 30000) {
+    if (speechMs > 200) recorder.heard = true;
+    const pauseMs = quietMode ? 1600 : 1200;
+    if ((recorder.heard && silenceMs > pauseMs) || (!recorder.heard && elapsed > 8000) || elapsed > 30000) {
       recorder.stop();
     }
   }, 50);
@@ -275,7 +299,7 @@ async function sendTurn(blob) {
       }
     }
     const res = await fetch("api/turn", { method: "POST", body: blob,
-      headers: { ...HEADERS, "Content-Type": blob.type } });
+      headers: { ...HEADERS, "Content-Type": blob.type, "X-Quiet": quietMode ? "1" : "0" } });
     if (res.status === 409) { setState("ready", "Busy or closing. Try again in a moment."); return; }
     if (!res.ok) throw new Error("HTTP " + res.status);
     const reader = res.body.getReader();
@@ -381,6 +405,59 @@ function openVideo(id) {
     window.open(web, "_blank", "noopener");
   }
 }
+
+// ---------- Whisper mode: for speaking softly (remembered on this device) ----------
+let quietMode = false;
+try { quietMode = localStorage.getItem("pva_quiet") === "1"; } catch (e) {}
+function showQuiet() {
+  $("quiet").classList.toggle("on", quietMode);
+  $("quiet").setAttribute("aria-pressed", String(quietMode));
+  $("quiet").textContent = quietMode ? "🤫 Whisper: on" : "🤫 Whisper";
+}
+$("quiet").addEventListener("click", () => {
+  quietMode = !quietMode;
+  try { localStorage.setItem("pva_quiet", quietMode ? "1" : "0"); } catch (e) {}
+  showQuiet();
+});
+showQuiet();
+
+// ---------- 🧠 Memory: see and delete what Jarvis knows about you ----------
+async function showMemory() {
+  const list = $("memList");
+  list.replaceChildren(el("li", "", "Loading…"));
+  $("memory").hidden = false;
+  try {
+    const r = await fetch("api/facts", { headers: HEADERS });
+    if (!r.ok) throw new Error();
+    const { facts } = await r.json();
+    list.replaceChildren();
+    if (!facts.length) {
+      list.appendChild(el("li", "", "Nothing yet. Tell Jarvis about yourself, e.g. \"I'm allergic to peanuts\"."));
+      return;
+    }
+    for (const f of facts) {
+      const li = el("li");
+      const text = el("span", "", f.text);
+      text.appendChild(el("small", "", [f.category, f.date].filter(Boolean).join(" · ")));
+      const del = el("button", "chip", "✕");
+      del.setAttribute("aria-label", "Delete this fact");
+      del.addEventListener("click", async () => {
+        const d = await fetch("api/facts/delete", { method: "POST",
+          headers: { ...HEADERS, "Content-Type": "application/json" },
+          body: JSON.stringify({ id: f.id }) }).catch(() => null);
+        if (d && d.ok) li.remove();
+      });
+      li.append(text, del);
+      list.appendChild(li);
+    }
+  } catch (e) {
+    list.replaceChildren(el("li", "", "Jarvis is off: start it to see its memory."));
+  }
+}
+$("memoryBtn").addEventListener("click", () => {
+  if ($("memory").hidden) showMemory(); else $("memory").hidden = true;
+});
+$("memClose").addEventListener("click", () => { $("memory").hidden = true; });
 
 // ---------- clear the chat on this screen (memory is not touched) ----------
 $("clear").addEventListener("click", () => {

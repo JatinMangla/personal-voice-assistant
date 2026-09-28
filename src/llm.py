@@ -48,6 +48,10 @@ def system_prompt(lang: str, facts: list[str], related: list[str], now: datetime
             "contains something the user is allergic to or avoids, clearly warn them and "
             "suggest a substitute; respect their diet, health and preferences in every "
             "answer; always follow their corrections.\n" + "\n".join(f"- {f}" for f in facts))
+    else:
+        parts.append("You haven't learned any facts about the user yet. If they ask what you "
+                     "know about them, say so honestly and invite them to tell you about "
+                     "themselves; don't claim you can only remember this chat.")
     if related:
         parts.append("Possibly related past conversations (use only if relevant):\n"
                      + "\n".join(f"- {r}" for r in related))

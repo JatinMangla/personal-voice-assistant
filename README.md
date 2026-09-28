@@ -180,6 +180,8 @@ The page shows minutes used today and when memory was last saved.
 | Any search | Results appear as **preview cards** (thumbnail, site, title, short text), like WhatsApp link previews. The voice never reads web addresses. |
 | **🖥 Share screen** (laptop/desktop only) | Share a window or your screen, then ask "what's this error?", "summarise this page", etc. Each time you ask, Jarvis looks at **one snapshot**; nothing is recorded or saved. Phone browsers don't allow screen sharing. |
 | **Clear** (top right) | Clears the chat on the screen only. Jarvis's memory is kept. |
+| **🧠 Memory** (top right) | Shows everything Jarvis knows about you, with ✕ to delete any fact. |
+| **🤫 Whisper** (under the mic) | For speaking softly, e.g. at night: Jarvis listens more sensitively and boosts your voice. It stays on until you tap it again. |
 | Just mention things about yourself: "I'm allergic to peanuts", "my daughter Riya is 8" | Jarvis **learns lasting facts by itself**, with no "remember that" needed. A note "🧠 Learned: …" shows what it picked up. Health and diet facts are always in front of it, so months later a recipe with peanuts comes with a warning and a substitute. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
 | Tap 👍 / 👎 under a reply | Rates it (tap again to undo). 👍 replies are what the assistant later learns your style from (Phase 5). |

@@ -26,14 +26,27 @@ class SpeechToText:
                 scores[lang] += prob
         return max(scores, key=scores.get)
 
-    def transcribe(self, audio_bytes: bytes) -> tuple[str, str]:
-        """Return (text, language). Text is "" when nothing was said."""
+    def transcribe(self, audio_bytes: bytes, quiet: bool = False) -> tuple[str, str]:
+        """Return (text, language). Text is "" when nothing was said.
+        quiet = Whisper mode: a softer speech detector for low voices."""
         from faster_whisper.audio import decode_audio
-        audio = decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
+        audio = normalize(decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000))
         if len(audio) < 16000 * 0.3:  # shorter than 0.3 s
             return "", "en"
         lang = self._pick_language(audio)
-        segments, _ = self.model.transcribe(audio, language=lang, beam_size=1,
-                                            vad_filter=True, condition_on_previous_text=False)
+        vad = {"threshold": 0.25, "min_speech_duration_ms": 150} if quiet else None
+        segments, _ = self.model.transcribe(audio, language=lang, beam_size=1, vad_filter=True,
+                                            vad_parameters=vad,
+                                            condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments).strip()
         return text, lang
+
+
+def normalize(audio, target_peak: float = 0.7, max_gain: float = 30.0):
+    """Make soft recordings louder (up to 30x), so quiet or whispered speech is heard.
+    Loud recordings are left as they are."""
+    import numpy as np
+    peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+    if peak < 1e-4 or peak >= target_peak:
+        return audio
+    return (audio * min(max_gain, target_peak / peak)).astype(np.float32)

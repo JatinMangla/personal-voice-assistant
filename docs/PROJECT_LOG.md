@@ -201,6 +201,42 @@ notebook. Lesson: always keep a copy in a password manager.
 **Status:** 137 local tests pass, and the page JavaScript passes `node --check`. These features
 are not yet tried on the owner's devices.
 
+## 2026-09-28 (later): Memory honesty, back-learning, Whisper mode, faster start
+
+**Owner reports and findings:**
+
+1. **"Share screen" only on the laptop.** Expected: Android and iOS browsers, including
+   installed PWAs, have no screen capture API.
+2. **"Jarvis said it only remembers things from the chat; it didn't know about me."**
+   - The log showed `[memory] loaded`, so no data was lost.
+   - The facts the owner told it were said **before** automatic learning existed, so they
+     sat only in the conversation history. "What do you know about me?" rarely matches that
+     history closely enough, the fact list was empty, and the model then falsely claimed it
+     can't remember.
+   - Fixes:
+     - The prompt states that it DOES remember, and to say "I haven't learned anything
+       yet" when the fact list is empty.
+     - **Back-learning:** `turns.learned` column; while the user is idle ≥ 15 s, the watchdog
+       reads one old turn per 5 s for facts.
+     - **🧠 Memory panel:** lists every fact with delete buttons.
+     - Fact limit raised to 50.
+3. **Saving risk found in review.** If a start ever misjudged an existing memory as "first
+   run", `datasets create` would fail with "already exists", and the old code then switched to
+   `version --delete-old-versions`, replacing the real memory with an empty one.
+   - Now `MemoryStore.blocked` refuses all saves in that case.
+   - The existence check asks twice (list + status).
+4. **"I have to speak louder lately."** Caused by the loudspeaker fix: the mic opens fresh for
+   every question, so the browser's automatic gain starts low. Fixes:
+   - Lower speech thresholds in the page (0.008 / noise × 2.2, down from 0.015 / × 2.5).
+   - `stt.normalize()` boosts soft audio up to 30×.
+   - New **🤫 Whisper mode**: browser noise suppression off, lower threshold, 1.6 s pause,
+     Silero VAD threshold 0.25.
+5. **11-minute start** (`ollama install 275s`, speech 175 s, LLM load 320 s). `/kaggle/input` is
+   sometimes very slow. `DOWNLOAD_FIRST`: Ollama from the internet (≈ 20 s measured earlier),
+   and the LLM pull + Hugging Face downloads run in parallel. The cache is only a fallback.
+
+**Status:** 145 tests pass. Waiting for the next Kaggle log to confirm the new start-up times.
+
 ## Open items / next steps
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.
 - On a real phone, confirm: loudspeaker/Bluetooth playback, PWA install and offline Start button,

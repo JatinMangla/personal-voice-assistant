@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,33 +79,58 @@ def install_ngrok(cache: Path | None) -> None:
 
 def _install_ollama_online() -> None:
     # The Ollama installer now needs "zstd" to unpack; Kaggle machines may not have it.
-    sh("command -v zstd || apt-get install -y -qq zstd "
-       "|| (apt-get update -qq && apt-get install -y -qq zstd)", stdout=subprocess.DEVNULL)
-    sh("curl -fsSL https://ollama.com/install.sh | sh", stdout=subprocess.DEVNULL)
+    for cmd in ("command -v zstd || apt-get install -y -qq zstd "
+                "|| (apt-get update -qq && apt-get install -y -qq zstd)",
+                "curl -fsSL https://ollama.com/install.sh | sh"):
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"Ollama install failed: {result.stderr.strip()[-300:]}")
+
+
+def _install_ollama_from_cache(cache: Path) -> None:
+    shutil.copy(cache / "ollama" / "bin" / "ollama", "/usr/local/bin/ollama")
+    os.chmod("/usr/local/bin/ollama", 0o755)
+    # Copied, not linked: /kaggle/input may not allow loading libraries from it.
+    # cuda_v13 is skipped: Kaggle's T4 driver uses cuda_v12.
+    shutil.copytree(cache / "ollama" / "lib" / "ollama", "/usr/local/lib/ollama",
+                    dirs_exist_ok=True, ignore=shutil.ignore_patterns("cuda_v13*"))
+    # Kaggle's saved output drops the "executable" permission, but Ollama runs
+    # helper programs from this folder (e.g. llama-server).
+    sh("chmod -R a+rx /usr/local/lib/ollama")
 
 
 def install_ollama(cache: Path | None) -> Path:
-    """Install the Ollama binary and link cached model files. Returns the models dir."""
+    """Install the Ollama program. Returns the (local) models folder.
+
+    Internet first: Kaggle's network is fast and steady (~20 s), while reading the same
+    files from the model cache (/kaggle/input) took anywhere from 33 s to 275 s."""
     models_dir = config.WORK_DIR / "ollama-models"
-    if not Path("/usr/local/bin/ollama").exists():
-        cached_bin = cache / "ollama" / "bin" / "ollama" if cache else None
-        if cached_bin and cached_bin.exists():
-            shutil.copy(cached_bin, "/usr/local/bin/ollama")
-            os.chmod("/usr/local/bin/ollama", 0o755)
-            # Copied, not linked: /kaggle/input may not allow loading libraries from it.
-            # cuda_v13 is skipped: Kaggle's T4 driver uses cuda_v12 (saves ~30 s of copying).
-            shutil.copytree(cache / "ollama" / "lib" / "ollama", "/usr/local/lib/ollama",
-                            dirs_exist_ok=True, ignore=shutil.ignore_patterns("cuda_v13*"))
-            # Kaggle's saved output drops the "executable" permission, but Ollama runs
-            # helper programs from this folder (e.g. llama-server).
-            sh("chmod -R a+rx /usr/local/lib/ollama")
-        else:
-            _install_ollama_online()
-    if cache and (cache / "ollama" / "models").is_dir() and not models_dir.exists():
-        # A tree of symlinks: instant, and nothing is copied off the read-only input.
-        sh(f"cp -rs '{cache / 'ollama' / 'models'}' '{models_dir}'")
     models_dir.mkdir(parents=True, exist_ok=True)
+    if Path("/usr/local/bin/ollama").exists():
+        return models_dir
+    sources = [("internet", _install_ollama_online)]
+    if cache and (cache / "ollama" / "bin" / "ollama").exists():
+        sources.append(("model cache", lambda: _install_ollama_from_cache(cache)))
+    if not config.DOWNLOAD_FIRST:
+        sources.reverse()
+    for i, (name, install) in enumerate(sources):
+        try:
+            install()
+            return models_dir
+        except Exception as e:
+            if i == len(sources) - 1:
+                raise
+            print(f"[setup] Ollama from the {name} failed ({type(e).__name__}); trying the next source")
     return models_dir
+
+
+def _link_cached_llm(cache: Path | None, models_dir: Path) -> bool:
+    """Make the model cache's LLM files visible to Ollama (a tree of symlinks: instant)."""
+    source = cache / "ollama" / "models" if cache else None
+    if not source or not source.is_dir():
+        return False
+    sh(f"cp -rsf '{source}/.' '{models_dir}/'")
+    return True
 
 
 _ollama_models_dir: Path | None = None
@@ -167,15 +193,27 @@ def reinstall_ollama_online() -> None:
     start_ollama()
 
 
-def ensure_llm() -> str:
-    """Make sure the chosen model is available; pull it (or the fallback) if not."""
+def _pull(model: str) -> bool:
+    env = {**os.environ, "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://")}
+    return subprocess.run(["ollama", "pull", model], env=env, capture_output=True).returncode == 0
+
+
+def ensure_llm(cache: Path | None = None, models_dir: Path | None = None) -> str:
+    """Get the LLM onto the local disk: download it (fast, steady) or, if that fails,
+    use the model cache. Falls back to the smaller model if needed."""
     import llm
+    t = time.time()
     for model in (config.LLM_MODEL, config.LLM_FALLBACK_MODEL):
         if llm.is_ready(model):
             return model
-        print(f"[setup] downloading {model} (not in cache, this takes a few minutes)")
-        env = {**os.environ, "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://")}
-        if subprocess.run(["ollama", "pull", model], env=env, capture_output=True).returncode == 0:
+        if not config.DOWNLOAD_FIRST and models_dir and _link_cached_llm(cache, models_dir) \
+                and llm.is_ready(model):
+            return model
+        if _pull(model):
+            print(f"[setup] {model} downloaded in {time.time() - t:.0f}s")
+            return model
+        print(f"[setup] could not download {model}; trying the model cache")
+        if models_dir and _link_cached_llm(cache, models_dir) and llm.is_ready(model):
             return model
     raise RuntimeError("Could not get any LLM model into Ollama.")
 
@@ -228,23 +266,39 @@ def install_tuned_model(key: bytes) -> str | None:
         (work / "model.gguf").unlink(missing_ok=True)  # Ollama keeps its own copy
 
 
-def model_paths(cache: Path | None) -> ModelPaths:
-    import torch
-    speech_gpu = config.SPEECH_GPU_INDEX if torch.cuda.device_count() > 1 else 0
-    hf = cache / "hf" if cache else None
-    if hf and (hf / "whisper").is_dir():
-        return ModelPaths(str(hf / "whisper"), hf / "kokoro", str(hf / "embed"), speech_gpu)
-
+def _download_speech_models() -> tuple[str, Path, str]:
     from huggingface_hub import snapshot_download
-    print("[setup] model cache not attached: downloading speech models")
     base = config.WORK_DIR / "hf"
     whisper = snapshot_download("mobiuslabsgmbh/faster-whisper-large-v3-turbo",
                                 local_dir=base / "whisper")
     kokoro = snapshot_download(config.KOKORO_REPO, local_dir=base / "kokoro",
                                allow_patterns=["config.json", "*.pth",
                                                *[f"voices/{v}.pt" for _, v in config.TTS_VOICES.values()]])
-    embed = snapshot_download(config.EMBED_MODEL, local_dir=base / "embed")
-    return ModelPaths(whisper, Path(kokoro), embed, speech_gpu)
+    embed = snapshot_download(config.EMBED_MODEL, local_dir=base / "embed",
+                              ignore_patterns=["*.onnx", "onnx/*", "*.h5", "*.msgpack", "*.ot",
+                                               "openvino/*"])
+    return whisper, Path(kokoro), embed
+
+
+def model_paths(cache: Path | None) -> ModelPaths:
+    """Speech + embedding model folders: downloaded (fast, steady) or from the cache."""
+    import torch
+    speech_gpu = config.SPEECH_GPU_INDEX if torch.cuda.device_count() > 1 else 0
+    hf = cache / "hf" if cache else None
+    cached = (str(hf / "whisper"), hf / "kokoro", str(hf / "embed")) \
+        if hf and (hf / "whisper").is_dir() else None
+    if cached and not config.DOWNLOAD_FIRST:
+        return ModelPaths(*cached, speech_gpu)
+    t = time.time()
+    try:
+        paths = _download_speech_models()
+        print(f"[setup] speech models downloaded in {time.time() - t:.0f}s")
+        return ModelPaths(*paths, speech_gpu)
+    except Exception as e:
+        if not cached:
+            raise
+        print(f"[setup] speech model download failed ({type(e).__name__}); using the model cache")
+        return ModelPaths(*cached, speech_gpu)
 
 
 def prepare() -> tuple[ModelPaths, str]:
@@ -273,8 +327,12 @@ def prepare() -> tuple[ModelPaths, str]:
     models_dir = install_ollama(cache)
     step("ollama install")
     start_ollama(models_dir)
-    llm_model = ensure_llm()
     step("ollama start")
-    paths = model_paths(cache)
+    # The LLM (~6.6 GB) and the speech models (~2.4 GB) download at the same time.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        llm_job = pool.submit(ensure_llm, cache, models_dir)
+        paths = model_paths(cache)
+        llm_model = llm_job.result()
+    step("models")
     print(f"[setup] steps: {', '.join(steps)}")
     return paths, llm_model

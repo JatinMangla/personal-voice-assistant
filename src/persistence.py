@@ -22,6 +22,7 @@ class MemoryStore:
         self.dataset = f"{username}/{config.MEMORY_DATASET_SLUG}"
         self.env = {**os.environ, **kaggle_env}
         self.exists = False
+        self.blocked = False  # True = never save (protects a memory we failed to load)
         self.last_saved: float | None = None
 
     def _kaggle(self, *args: str) -> subprocess.CompletedProcess:
@@ -51,18 +52,21 @@ class MemoryStore:
             return crypto.decrypt(files[0].read_bytes(), self.key)
 
     def _memory_dataset_exists(self) -> bool:
-        """True/False from the list of your own datasets. Raises if Kaggle refuses
-        the login itself, so a wrong token is never mistaken for "no memory yet"."""
+        """Asked two independent ways; "no" only if both say no. Raises if Kaggle
+        refuses the login itself, so a wrong token is never mistaken for "no memory yet"."""
         result = self._kaggle("datasets", "list", "--mine", "--search",
                               config.MEMORY_DATASET_SLUG, "--csv")
         if result.returncode != 0:
             raise StorageError("Kaggle login failed. Check the KAGGLE_USERNAME and "
                                "KAGGLE_API_TOKEN secrets. Details: "
                                f"{(result.stderr or result.stdout).strip()[-300:]}")
-        refs = [line.split(",", 1)[0].strip().lower() for line in result.stdout.splitlines()]
-        return self.dataset.lower() in refs
+        if self.dataset.lower() in result.stdout.lower():
+            return True
+        return self._kaggle("datasets", "status", self.dataset).returncode == 0
 
     def save(self, plaintext: bytes, attempts: int = 3) -> bool:
+        if self.blocked:
+            return False
         blob = crypto.encrypt(plaintext, self.key)
         if crypto.decrypt(blob, self.key) != plaintext:  # never upload a broken file
             raise StorageError("Encryption self-check failed.")
@@ -84,13 +88,19 @@ class MemoryStore:
                 else:
                     args = ["datasets", "create", "-p", tmp]  # private by default
                 result = self._kaggle(*args)
-            if result.returncode == 0:
+            output = (result.stdout + result.stderr).lower()
+            if result.returncode == 0 and "error" not in output:
                 self.exists = True
                 self.last_saved = time.time()
                 return True
             print(f"[memory] upload attempt {attempt} failed: {result.stderr.strip()[-200:]}")
-            if not self.exists and "already" in (result.stdout + result.stderr).lower():
-                self.exists = True  # created earlier; next attempt makes a new version
+            if not self.exists and ("already" in output or "409" in output):
+                # We started with an empty memory, but a saved memory exists: it could not
+                # be loaded this time. NEVER replace it with this empty one.
+                self.blocked = True
+                print("[memory] NOT SAVING: your saved memory exists but was not loaded at "
+                      "start. It is left untouched; restart Jarvis to load it.")
+                return False
             time.sleep(5 * attempt)
         return False
 

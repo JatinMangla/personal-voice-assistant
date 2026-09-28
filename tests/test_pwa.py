@@ -27,7 +27,7 @@ class Fake:
     pipelines = {"en": None}
     last_saved = None
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, quiet=False):
         return "", "en"
 
 

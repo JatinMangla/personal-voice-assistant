@@ -88,6 +88,8 @@ class Assistant:
         # Screen snapshot sent just before a question (screen sharing); used once,
         # never stored.
         self.pending_screen: tuple[bytes, float] | None = None
+        self.backlearn_stopped = False
+        self.backlearn_count = [0, 0]  # old conversations read, facts learned
         self.budget = Budget(config.NOTIFY_AT, config.STOP_AT)
         self.notices: queue.SimpleQueue = queue.SimpleQueue()  # 90 % warnings to speak
         self.server = None  # uvicorn.Server, set by main.py
@@ -100,12 +102,13 @@ class Assistant:
         self.stopped = threading.Event()
 
     # --- one spoken turn -------------------------------------------------------
-    def handle_turn(self, audio: bytes):
-        """Generator of NDJSON events: transcript, then sentence text + audio pairs."""
+    def handle_turn(self, audio: bytes, quiet: bool = False):
+        """Generator of NDJSON events: transcript, then sentence text + audio pairs.
+        quiet = Whisper mode (soft voice): boost the audio and listen more sensitively."""
         t0 = time.time()
         first_audio = None
         try:
-            text, lang = self.stt.transcribe(audio)
+            text, lang = self.stt.transcribe(audio, quiet=quiet)
             heard = time.time() - t0
             yield _line(type="transcript", text=text, lang=lang)
             if not text:
@@ -140,7 +143,7 @@ class Assistant:
                 if links:
                     yield _line(type="links", links=links)
                 turn_id = self.memory.add_turn(text, " ".join(reply_parts), lang, now, model)
-                yield from self._learn(text, now)
+                yield from self._learn(text, now, turn_id)
                 # Timings only; never the words.
                 print(f"[turn] {lang}{' +screen' if screen else ''}: heard in {heard:.1f}s, "
                       f"first audio at {first_audio or 0:.1f}s, done at {time.time() - t0:.1f}s "
@@ -177,18 +180,44 @@ class Assistant:
             yield from chunker.feed(piece)
         yield from chunker.flush()
 
-    def _learn(self, text: str, now: datetime):
+    def _learn(self, text: str, now: datetime, turn_id: int | None = None):
         """Pick up lasting facts from what the user said; never breaks the turn."""
         if not config.LEARN_FROM_CHAT:
             return
         try:
             learned = learn.learn(self.memory, text, now)
         except Exception as e:
-            print(f"[learn] skipped: {type(e).__name__}")
+            print(f"[learn] skipped: {type(e).__name__}: {str(e)[:120]}")
             return
+        if turn_id:
+            self.memory.mark_learned(turn_id)
         if learned:
             print(f"[learn] {len(learned)} new fact(s)")  # count only, never the content
             yield _line(type="learned", facts=learned)
+
+    def backlearn_one(self) -> bool:
+        """Read ONE old conversation for facts (older chats from before automatic
+        learning existed). Returns False when there is nothing left to do."""
+        if self.backlearn_stopped or not config.LEARN_FROM_CHAT:
+            return False
+        rows = self.memory.unlearned_turns(1)
+        if not rows:
+            if self.backlearn_count[0]:
+                print(f"[learn] old conversations read: {self.backlearn_count[0]}, "
+                      f"facts learned: {self.backlearn_count[1]}")
+            self.backlearn_stopped = True
+            return False
+        turn_id, ts, user_text = rows[0]
+        try:
+            when = datetime.fromisoformat(ts) if ts else now_ist()
+            self.backlearn_count[1] += len(learn.learn(self.memory, user_text, when))
+        except Exception as e:  # Ollama busy/restarting: try again next session
+            print(f"[learn] back-learning paused: {type(e).__name__}")
+            self.backlearn_stopped = True
+            return False
+        self.memory.mark_learned(turn_id)
+        self.backlearn_count[0] += 1
+        return True
 
     def _speak(self, sentence: str, lang: str, ignore_errors: bool = False):
         spoken = _URL.sub("", sentence).strip()  # links are shown, never read out
@@ -300,6 +329,10 @@ class Assistant:
             if time.time() - last_health >= 30:
                 last_health = time.time()
                 self._check_ollama()
+            # While you're quiet: learn facts from old conversations, one per tick.
+            if (not self.turn_lock.locked() and self.state != "closing"
+                    and self.timer.idle_seconds(now) >= config.BACKLEARN_AFTER_IDLE_SEC):
+                self.backlearn_one()
 
     def _check_ollama(self) -> None:
         try:
@@ -415,9 +448,11 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
         # turn and frees the lock) even if the phone disconnects midway.
         events: queue.Queue = queue.Queue()
 
+        quiet = request.headers.get("x-quiet") == "1"  # Whisper mode on the page
+
         def worker():
             try:
-                for event in assistant.handle_turn(audio):
+                for event in assistant.handle_turn(audio, quiet):
                     events.put(event)
             finally:
                 events.put(None)
@@ -446,6 +481,19 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
             return JSONResponse({"error": "JPEG or PNG up to 3 MB only"}, status_code=400)
         assistant.pending_screen = (image, time.time())
         return {"ok": True}
+
+    @app.get("/api/facts")
+    def facts():
+        """What Jarvis knows about you (🧠 Memory panel)."""
+        return {"facts": assistant.memory.list_facts()}
+
+    @app.post("/api/facts/delete")
+    async def delete_fact(request: Request):
+        body = await request.json()
+        try:
+            return {"ok": assistant.memory.delete_fact(int(body["id"]))}
+        except (KeyError, TypeError, ValueError):
+            return JSONResponse({"error": "bad id"}, status_code=400)
 
     @app.post("/api/rate")
     async def rate(request: Request):

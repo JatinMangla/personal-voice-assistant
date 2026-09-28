@@ -53,9 +53,29 @@ def test_first_run_kaggle_403_for_missing_private_dataset():
     # Real Kaggle behaviour: 403 for a private dataset that doesn't exist yet.
     store, calls = MemoryStore("me", KEY, {}), []
     fake_kaggle(store, [(1, "403 Client Error: Forbidden"),
-                        (0, "ref,title,size\nme/other-data,Other,1KB")], calls)
+                        (0, "ref,title,size\nme/other-data,Other,1KB"),
+                        (1, "404 Not Found")], calls)  # second, independent check
     assert store.load() is None
-    assert calls[1][:2] == ("datasets", "list")
+    assert calls[1][:2] == ("datasets", "list") and calls[2][:2] == ("datasets", "status")
+
+
+def test_existing_memory_found_by_status_check_is_not_a_first_run():
+    store, calls = MemoryStore("me", KEY, {}), []
+    fake_kaggle(store, [(1, "403 Client Error: Forbidden"),
+                        (0, "no datasets found"),     # list is empty/odd...
+                        (0, "ready")], calls)         # ...but status says it exists
+    with pytest.raises(StorageError, match="Could not download"):
+        store.load()
+
+
+def test_never_overwrites_a_memory_that_failed_to_load():
+    # Started as "first run", but the memory dataset actually exists.
+    store, calls = MemoryStore("me", KEY, {}), []
+    fake_kaggle(store, [(1, "409 Conflict: dataset already exists")], calls)
+    assert store.save(b"empty new memory") is False
+    assert store.blocked
+    assert store.save(b"again") is False
+    assert len(calls) == 1  # no "version" upload was ever attempted
 
 
 def test_existing_memory_but_download_fails_refuses_to_start_empty():

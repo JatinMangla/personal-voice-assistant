@@ -108,7 +108,7 @@ class FakeSTT:
     def __init__(self, text):
         self.text = text
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, quiet=False):
         return self.text, "en"
 
 

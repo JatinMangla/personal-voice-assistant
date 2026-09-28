@@ -133,7 +133,7 @@ def test_screen_snapshot_goes_to_the_model_once(embedder, monkeypatch):
     monkeypatch.setattr(app_module.learn, "learn", lambda m, t, n: [])
 
     class STT:
-        def transcribe(self, audio):
+        def transcribe(self, audio, quiet=False):
             return "what is this error on my screen", "en"
 
     class TTS:

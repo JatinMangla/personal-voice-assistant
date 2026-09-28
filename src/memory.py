@@ -74,6 +74,7 @@ class Memory:
         self.conn.execute("PRAGMA secure_delete = ON")
         self.conn.executescript(SCHEMA)
         self._add_column("turns", "model", "TEXT")      # Phase 5: which LLM replied
+        self._add_column("turns", "learned", "INTEGER DEFAULT 0")  # facts extracted yet?
         self._add_column("facts", "category", "TEXT")   # health, diet, person, ...
         self._add_column("facts", "source", "TEXT")     # "user" (said "remember") or "auto"
 
@@ -186,9 +187,32 @@ class Memory:
         scored = [(fid, t, float(np.dot(q, _from_blob(e)))) for fid, t, e in rows]
         return sorted(scored, key=lambda r: r[2], reverse=True)[:k]
 
-    def delete_fact(self, fact_id: int) -> None:
+    def delete_fact(self, fact_id: int) -> bool:
         with self.lock:
-            self.conn.execute("DELETE FROM facts WHERE id = ?", (fact_id,))
+            cur = self.conn.execute("DELETE FROM facts WHERE id = ?", (fact_id,))
+            self.conn.commit()
+            self.dirty = True
+            return cur.rowcount == 1
+
+    def list_facts(self) -> list[dict]:
+        """Everything Jarvis knows about the user, for the 🧠 Memory panel."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, text, category, source, ts FROM facts ORDER BY id").fetchall()
+        return [{"id": i, "text": t, "category": c or ("remembered" if s != "auto" else "other"),
+                 "date": (ts or "")[:10]} for i, t, c, s, ts in rows]
+
+    # --- learning from old conversations (back-learning) ----------------------------
+    def unlearned_turns(self, limit: int) -> list[tuple[int, str, str]]:
+        """(id, ts, user_text) of past turns not yet read for facts, oldest first."""
+        with self.lock:
+            return self.conn.execute(
+                "SELECT id, ts, user_text FROM turns WHERE COALESCE(learned, 0) = 0 "
+                "ORDER BY id LIMIT ?", (limit,)).fetchall()
+
+    def mark_learned(self, turn_id: int) -> None:
+        with self.lock:
+            self.conn.execute("UPDATE turns SET learned = 1 WHERE id = ?", (turn_id,))
             self.conn.commit()
             self.dirty = True
 

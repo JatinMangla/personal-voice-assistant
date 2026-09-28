@@ -53,7 +53,10 @@ ngrok (fixed domain, Google OAuth allowlist)  ->  FastAPI on Kaggle (src/app.py)
   llm.py      Ollama qwen3.5:9b (GPU0), think=false, streamed, tools:
               web_search / find_video / find_prices (websearch.py, pages.py)
   tts.py      Kokoro (en af_heart, hi hf_alpha) -> MP3 per sentence
-  learn.py    after the reply: extract lasting facts from the USER's words (JSON schema call)
+  learn.py    after the reply: extract lasting facts from the USER's words (JSON schema call);
+              watchdog "back-learns" old turns (turns.learned = 0) while the user is idle
+  UI extras   🧠 Memory panel (GET /api/facts, POST /api/facts/delete), 🤫 Whisper mode,
+              🖥 screen snapshot (desktop only), Clear (UI only), 👍/👎
   events: transcript, sentence(+audio), links(cards), learned, done(turn_id for 👍/👎)
 ```
 Background: `Assistant.watchdog` ticks every 5 s: usage clock, budget, idle close, autosave
@@ -128,6 +131,24 @@ node --check src/static/sw.js                  # and the <script> of index.html
 15. ddgs (search) needs no key; the office network of the dev laptop sometimes blocks
     DuckDuckGo DNS: that's local, Kaggle is fine.
 16. faster-whisper often labels Hindi as Urdu: restrict to en/hi and map ur -> hi.
+17. `/kaggle/input` (model cache) read speed varies wildly: the same run took 275 s to copy
+    Ollama libs, 175 s for speech models, 320 s for the LLM (vs 33/66/48 s on a good day).
+    The internet is fast and steady, so `config.DOWNLOAD_FIRST = True`: download Ollama, the
+    LLM and the speech models (the last two in parallel); the cache is only the fallback.
+18. Opening the mic fresh for every question (needed for loudspeaker playback) restarts the
+    browser's automatic gain, so speech starts quiet: lower silence thresholds in the page,
+    `stt.normalize()` boosts soft audio (≤ 30x), and **Whisper mode** (🤫 button, `X-Quiet: 1`)
+    turns off browser noise suppression and uses a softer Silero VAD.
+19. Memory safety: if a start treated an existing memory as "first run" and then `datasets
+    create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
+    memory must never replace the real one).
+
+## Status (2026-09-28, later)
+- Owner reported: (a) "Share screen" missing on the phone PWA: expected, phone browsers have
+  no screen capture; (b) Jarvis said it only remembers the current chat: memory WAS loaded
+  (`[memory] loaded`), but facts told before automatic learning existed were never extracted:
+  fixed with back-learning + honest prompt + 🧠 Memory panel; (c) had to speak louder since the
+  loudspeaker fix: fixed (see gotcha 18) + Whisper mode; (d) an 11-minute start: see gotcha 17.
 
 ## Status (2026-09-28)
 - **Verified on Kaggle by the owner:** start-up (~148 s ready), GPU use, voice loop (first audio

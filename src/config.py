@@ -11,8 +11,9 @@ ABOUT_ASSISTANT = (
     "(Kaggle), not on the user's phone or laptop. The user's device talks to you over the "
     "internet through a private, secured link, so it needs Wi-Fi or mobile data; without "
     "internet you cannot hear or answer, and there is no offline mode. You run only after the "
-    "user starts you, and you switch off after 10 minutes without use. You remember things "
-    "between sessions in encrypted memory. You can search the internet only when a search "
+    "user starts you, and you switch off after 10 minutes without use. You DO remember the "
+    "user across sessions: facts they told you (listed below, when you know any) and related "
+    "earlier conversations, kept in encrypted memory. You can search the internet only when a search "
     "tool is available. You cannot make calls, send messages, set alarms or reminders, or "
     "control devices unless a tool for it is available."
 )
@@ -71,7 +72,7 @@ MEMORY_DATASET_SLUG = "assistant-memory"
 MEMORY_FILE_NAME = "memory.db.enc"
 MEMORY_TOP_K = 5
 MEMORY_MIN_SIMILARITY = 0.80  # e5 scores are high overall; below this = unrelated
-ALL_FACTS_LIMIT = 30          # facts always included in the prompt
+ALL_FACTS_LIMIT = 50          # max facts in the prompt (health/diet/corrections always)
 RECENT_TURNS = 6              # last N turns of this session sent as chat history
 FORGET_MIN_SIMILARITY = 0.85
 # Learning facts from normal conversation (learn.py)
@@ -80,6 +81,7 @@ LEARN_FROM_CHAT = True
 ALWAYS_SHOWN_CATEGORIES = ("health", "diet", "assistant")
 LEARN_KNOWN_FACTS = 5                # similar known facts shown, so changes replace them
 LEARN_DUPLICATE_SIMILARITY = 0.93    # at or above this, a new fact counts as known
+BACKLEARN_AFTER_IDLE_SEC = 15        # read old conversations for facts while you're quiet
 DELETE_OLD_DATASET_VERSIONS = True  # so "forget" also removes old copies
 
 # --- Session ---------------------------------------------------------------------
@@ -112,6 +114,10 @@ OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Marker file used to find the attached model cache under /kaggle/input
 MODELS_MARKER = "PVA_MODELS_CACHE.json"
+# Download Ollama and the models from the internet first, and use the model cache only
+# if that fails. Measured on Kaggle: the internet is fast and steady, while reading the
+# cache (/kaggle/input) varied from 48 s to 320 s for the LLM alone.
+DOWNLOAD_FIRST = True
 
 
 def kaggle_credentials() -> tuple[str, dict[str, str]]:
