@@ -55,8 +55,11 @@ ngrok (fixed domain, Google OAuth allowlist)  ->  FastAPI on Kaggle (src/app.py)
   tts.py      Kokoro (en af_heart, hi hf_alpha) -> MP3 per sentence
   learn.py    after the reply: extract lasting facts from the USER's words (JSON schema call);
               watchdog "back-learns" old turns (turns.learned = 0) while the user is idle
-  UI extras   🧠 Memory panel (GET /api/facts, POST /api/facts/delete), 🤫 Whisper mode,
-              🖥 screen snapshot (desktop only), Clear (UI only), 👍/👎
+              + learn.reflect(): every few minutes while idle and at session end, stores
+              "pattern" facts (focus, recurring interests, habits, how they like help)
+  UI          fixed header top, chat scrolls, fixed bottom bar [🤫 Whisper] (mic) [▶ Start];
+              🖥 screen snapshot (desktop only), Clear (UI only), 👍/👎. The owner asked for
+              NO memory button: memory is automatic (/api/facts endpoints still exist, unused)
   events: transcript, sentence(+audio), links(cards), learned, done(turn_id for 👍/👎)
 ```
 Background: `Assistant.watchdog` ticks every 5 s: usage clock, budget, idle close, autosave
@@ -144,6 +147,17 @@ node --check src/static/sw.js                  # and the <script> of index.html
     push. Now it also checks the ngrok link (offline = `ngrok-error-code` header) and fails
     red with advice; the workflow has a `force` checkbox. `main._startup_guard` stops any run
     not ready within `STARTUP_TIMEOUT_MIN` (20) so a hang can't burn GPU hours.
+21. Earpiece again "sometimes": `getUserMedia` with `echoCancellation: true` puts phones in
+    call mode (earpiece, Bluetooth HFP). Jarvis never listens while speaking, so AEC is off;
+    playback waits 600 ms after the mic is released. Media audio then follows the phone:
+    loudspeaker, or wired/Bluetooth headphones when connected.
+22. `InvalidDataError` on some recordings (phone-side, mid-session): `stt.decode()` retries
+    via a temp file named by magic bytes; still unreadable -> `AudioUnreadable` -> page says
+    "tap again" (no spoken error); log shows size/type only.
+23. Speed: the system prompt is ordered static -> facts -> language/time/related so Ollama
+    reuses the cached prefix; `OLLAMA_NUM_PARALLEL=2` so the learning call doesn't evict the
+    chat's cache. Start-up: the LLM downloads+loads+warms in a background job while the
+    speech models download and load (first answer after load took ~47 s = GPU init).
 19. Memory safety: if a start treated an existing memory as "first run" and then `datasets
     create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
     memory must never replace the real one).

@@ -63,6 +63,7 @@ def test_old_conversations_are_read_once_for_facts(embedder, monkeypatch):
 def test_new_turns_are_marked_learned(embedder, monkeypatch):
     a, client, _, calls = make(embedder, monkeypatch)
     client.post("/api/turn", content=b"audio")
+    a.learn_thread.join(timeout=5)  # learning runs in the background
     assert calls == ["hello there friend"]
     assert a.memory.unlearned_turns(10) == []  # won't be read again by back-learning
 

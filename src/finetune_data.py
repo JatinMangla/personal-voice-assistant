@@ -15,13 +15,20 @@ _LOOKS_PRIVATE = re.compile(
     r"\d{4,}"                       # PINs, OTPs, account/phone numbers, card digits
     r"|\d[\d\s-]{6,}\d"             # numbers written with spaces or dashes
     r"|[\w.+-]+@[\w-]+\.[\w.]+"     # email addresses
-    r"|password|पासवर्ड|pin\b|otp\b",
+    r"|password|पासवर्ड|\bpin\b|\botp\b|\bcvv\b",
     re.IGNORECASE,
+)
+# Dates are not secrets: "bought a car in September 2026", "2026-09-28", "28/09/2026".
+_DATES = re.compile(
+    r"\b(?:19|20)\d{2}-\d{1,2}-\d{1,2}\b"              # 2026-09-28
+    r"|\b\d{1,2}[/.-]\d{1,2}[/.-](?:19|20)\d{2}\b"      # 28/09/2026
+    # 2026 on its own (not a group inside a longer number like "98 2026 1234")
+    r"|(?<!\d)(?<!\d[\s-])\b(?:19|20)\d{2}\b(?!\d)(?![\s-]\d)"
 )
 
 
 def looks_private(text: str) -> bool:
-    return bool(_LOOKS_PRIVATE.search(text))
+    return bool(_LOOKS_PRIVATE.search(_DATES.sub(" ", text)))
 
 
 def build_examples(good_turns: list[tuple[str, str, str, str]]) -> list[list[dict]]:

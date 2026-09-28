@@ -75,6 +75,7 @@ class Memory:
         self.conn.executescript(SCHEMA)
         self._add_column("turns", "model", "TEXT")      # Phase 5: which LLM replied
         self._add_column("turns", "learned", "INTEGER DEFAULT 0")  # facts extracted yet?
+        self._add_column("turns", "reflected", "INTEGER DEFAULT 0")  # patterns looked for?
         self._add_column("facts", "category", "TEXT")   # health, diet, person, ...
         self._add_column("facts", "source", "TEXT")     # "user" (said "remember") or "auto"
 
@@ -209,6 +210,21 @@ class Memory:
             return self.conn.execute(
                 "SELECT id, ts, user_text FROM turns WHERE COALESCE(learned, 0) = 0 "
                 "ORDER BY id LIMIT ?", (limit,)).fetchall()
+
+    def unreflected_turns(self, limit: int) -> list[tuple[int, str]]:
+        """(id, user_text) of the most recent turns not yet reviewed for patterns."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT id, user_text FROM turns WHERE COALESCE(reflected, 0) = 0 "
+                "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        return list(reversed(rows))
+
+    def mark_reflected(self, turn_ids: list[int]) -> None:
+        with self.lock:
+            self.conn.executemany("UPDATE turns SET reflected = 1 WHERE id = ?",
+                                  [(i,) for i in turn_ids])
+            self.conn.commit()
+            self.dirty = True
 
     def mark_learned(self, turn_id: int) -> None:
         with self.lock:

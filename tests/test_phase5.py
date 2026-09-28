@@ -44,6 +44,15 @@ def test_old_database_gets_model_column(embedder):
     ("what's my password", True),
     ("tell me a joke about cats", False),
     ("मेरा दिन अच्छा था", False),
+    # dates are not secrets
+    ("User bought a Honda City in September 2026.", False),
+    ("my exam is on 2026-10-15", False),
+    ("I joined on 28/09/2026", False),
+    # ...but a year-like PIN or long numbers still are
+    ("my ATM pin is 2019", True),
+    ("card 4111 1111 1111 1111", True),
+    ("call 9811223344", True),
+    ("call me on 98 2026 1234", True),  # a year-like group inside a phone number
 ])
 def test_private_looking_turns_are_detected(text, private):
     assert looks_private(text) is private

@@ -77,11 +77,17 @@ RECENT_TURNS = 6              # last N turns of this session sent as chat histor
 FORGET_MIN_SIMILARITY = 0.85
 # Learning facts from normal conversation (learn.py)
 LEARN_FROM_CHAT = True
-# In every prompt: allergies/diet, and your corrections of the assistant ("assistant").
-ALWAYS_SHOWN_CATEGORIES = ("health", "diet", "assistant")
+# In every prompt: allergies/diet, your corrections of the assistant ("assistant"), your
+# preferences and the patterns it noticed (what you focus on, how you like help).
+ALWAYS_SHOWN_CATEGORIES = ("health", "diet", "assistant", "preference", "pattern")
 LEARN_KNOWN_FACTS = 5                # similar known facts shown, so changes replace them
 LEARN_DUPLICATE_SIMILARITY = 0.93    # at or above this, a new fact counts as known
 BACKLEARN_AFTER_IDLE_SEC = 15        # read old conversations for facts while you're quiet
+# Patterns (what you focus on, habits, how you like help): looked for over your recent
+# messages while you're quiet and when a session ends.
+REFLECT_MIN_MESSAGES = 6
+REFLECT_MAX_MESSAGES = 40
+REFLECT_EVERY_MIN = 5
 DELETE_OLD_DATASET_VERSIONS = True  # so "forget" also removes old copies
 
 # --- Session ---------------------------------------------------------------------

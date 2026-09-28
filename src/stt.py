@@ -29,8 +29,7 @@ class SpeechToText:
     def transcribe(self, audio_bytes: bytes, quiet: bool = False) -> tuple[str, str]:
         """Return (text, language). Text is "" when nothing was said.
         quiet = Whisper mode: a softer speech detector for low voices."""
-        from faster_whisper.audio import decode_audio
-        audio = normalize(decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000))
+        audio = normalize(decode(audio_bytes))
         if len(audio) < 16000 * 0.3:  # shorter than 0.3 s
             return "", "en"
         lang = self._pick_language(audio)
@@ -40,6 +39,43 @@ class SpeechToText:
                                             condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segments).strip()
         return text, lang
+
+
+class AudioUnreadable(Exception):
+    """The browser sent a recording that can't be decoded."""
+
+
+def audio_kind(data: bytes) -> str:
+    """File type from the first bytes (the browser decides the format)."""
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return "webm"
+    if data[:4] == b"OggS":
+        return "ogg"
+    if data[4:8] == b"ftyp":
+        return "mp4"
+    if data[:4] == b"RIFF":
+        return "wav"
+    return "unknown"
+
+
+def decode(audio_bytes: bytes):
+    """Browser recording -> 16 kHz mono samples. Retries as a named file (the decoder
+    guesses formats better from a file name) before giving up."""
+    import tempfile
+    from faster_whisper.audio import decode_audio
+    try:
+        return decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
+    except Exception as first_error:
+        kind = audio_kind(audio_bytes)
+        suffix = {"mp4": ".m4a"}.get(kind, f".{kind}" if kind != "unknown" else ".webm")
+        with tempfile.NamedTemporaryFile(suffix=suffix) as f:
+            f.write(audio_bytes)
+            f.flush()
+            try:
+                return decode_audio(f.name, sampling_rate=16000)
+            except Exception:
+                raise AudioUnreadable(f"{len(audio_bytes)} bytes, type {kind}, starts "
+                                      f"{audio_bytes[:4].hex()} ({type(first_error).__name__})")
 
 
 def normalize(audio, target_peak: float = 0.7, max_gain: float = 30.0):

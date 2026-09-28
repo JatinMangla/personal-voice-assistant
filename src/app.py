@@ -21,6 +21,7 @@ import llm
 import websearch
 from budget import Budget, Meter, current_meters, minutes_until_stop
 from intents import parse_command
+from stt import AudioUnreadable
 
 _URL = re.compile(r"(https?://|www\.)\S+")
 
@@ -89,6 +90,8 @@ class Assistant:
         # never stored.
         self.pending_screen: tuple[bytes, float] | None = None
         self.backlearn_stopped = False
+        self.last_reflect = time.time()
+        self.learn_thread: threading.Thread | None = None
         self.backlearn_count = [0, 0]  # old conversations read, facts learned
         self.budget = Budget(config.NOTIFY_AT, config.STOP_AT)
         self.notices: queue.SimpleQueue = queue.SimpleQueue()  # 90 % warnings to speak
@@ -108,7 +111,12 @@ class Assistant:
         t0 = time.time()
         first_audio = None
         try:
-            text, lang = self.stt.transcribe(audio, quiet=quiet)
+            try:
+                text, lang = self.stt.transcribe(audio, quiet=quiet)
+            except AudioUnreadable as e:  # a bad recording from the phone: just ask again
+                print(f"[turn] recording unreadable: {e}")  # size/type only, never content
+                yield _line(type="done", heard=False)
+                return
             heard = time.time() - t0
             yield _line(type="transcript", text=text, lang=lang)
             if not text:
@@ -143,11 +151,11 @@ class Assistant:
                 if links:
                     yield _line(type="links", links=links)
                 turn_id = self.memory.add_turn(text, " ".join(reply_parts), lang, now, model)
-                yield from self._learn(text, now, turn_id)
                 # Timings only; never the words.
                 print(f"[turn] {lang}{' +screen' if screen else ''}: heard in {heard:.1f}s, "
                       f"first audio at {first_audio or 0:.1f}s, done at {time.time() - t0:.1f}s "
                       f"({llm.speed_report()})")
+                self._learn_later(text, now, turn_id)
 
             while not self.notices.empty():  # free-plan warnings, spoken once each
                 yield from self._speak(notice_text(self.notices.get(), lang), lang)
@@ -180,20 +188,26 @@ class Assistant:
             yield from chunker.feed(piece)
         yield from chunker.flush()
 
-    def _learn(self, text: str, now: datetime, turn_id: int | None = None):
-        """Pick up lasting facts from what the user said; never breaks the turn."""
-        if not config.LEARN_FROM_CHAT:
-            return
+    def _learn_later(self, text: str, now: datetime, turn_id: int | None = None) -> None:
+        """Learn from what the user said in the background, so the next question is never
+        blocked; memory happens quietly, without anything shown in the chat."""
+        if config.LEARN_FROM_CHAT:
+            self.learn_thread = threading.Thread(target=self._learn, args=(text, now, turn_id),
+                                                 daemon=True)
+            self.learn_thread.start()
+
+    def _learn(self, text: str, now: datetime, turn_id: int | None = None) -> list[str]:
+        """Pick up lasting facts from what the user said; never breaks anything."""
         try:
             learned = learn.learn(self.memory, text, now)
         except Exception as e:
             print(f"[learn] skipped: {type(e).__name__}: {str(e)[:120]}")
-            return
+            return []
         if turn_id:
             self.memory.mark_learned(turn_id)
         if learned:
             print(f"[learn] {len(learned)} new fact(s)")  # count only, never the content
-            yield _line(type="learned", facts=learned)
+        return learned
 
     def backlearn_one(self) -> bool:
         """Read ONE old conversation for facts (older chats from before automatic
@@ -290,6 +304,7 @@ class Assistant:
             text = limit_goodbye(meter, self.last_lang)
         else:
             text = PHRASES.get(self.last_lang, PHRASES["en"])["bye_idle"]
+        self.reflect()  # last look for patterns in this session's messages
         self.memory.add_usage(*self.timer.tick(now_ist()))
         try:
             self.goodbye_audio = self.tts.synthesize(text, self.last_lang)
@@ -329,10 +344,25 @@ class Assistant:
             if time.time() - last_health >= 30:
                 last_health = time.time()
                 self._check_ollama()
-            # While you're quiet: learn facts from old conversations, one per tick.
+            # While you're quiet: learn facts from old conversations (one per tick), then
+            # look for patterns across recent messages (every few minutes at most).
             if (not self.turn_lock.locked() and self.state != "closing"
                     and self.timer.idle_seconds(now) >= config.BACKLEARN_AFTER_IDLE_SEC):
-                self.backlearn_one()
+                if not self.backlearn_one() and \
+                        time.time() - self.last_reflect >= config.REFLECT_EVERY_MIN * 60:
+                    self.reflect()
+
+    def reflect(self) -> None:
+        """Store patterns (focus, habits, how the user likes help); never fails a session."""
+        self.last_reflect = time.time()
+        if not config.LEARN_FROM_CHAT:
+            return
+        try:
+            found = learn.reflect(self.memory, now_ist())
+            if found:
+                print(f"[learn] {len(found)} pattern(s) noticed")  # count only
+        except Exception as e:
+            print(f"[learn] pattern review skipped: {type(e).__name__}")
 
     def _check_ollama(self) -> None:
         try:

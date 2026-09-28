@@ -237,6 +237,52 @@ are not yet tried on the owner's devices.
 
 **Status:** 145 tests pass. Waiting for the next Kaggle log to confirm the new start-up times.
 
+## 2026-09-28 (evening): Automatic memory, speaker fix, UI layout
+
+**Owner log** (download-first start):
+
+| What | Result |
+|---|---|
+| Downloads | LLM 63 s, speech 67 s (in parallel) |
+| LLM start-up | load 62 s, first answer 47 s (GPU init) |
+| Ready | 309 s |
+| Turns | first audio 3–4.7 s, prompts ~1,600 tokens |
+| Errors | 9 × `InvalidDataError` (unreadable recordings) near the end |
+
+**Owner requests:**
+- No Memory button. The assistant itself should decide what to store: details, preferences,
+  settings, decisions, actions, behaviour, what they focus on.
+- The speaker still sometimes goes to the earpiece. With wired/Bluetooth headphones sound
+  should go there, otherwise to the loudspeaker.
+- UI: header fixed at top, mic fixed at bottom, Whisper beside the mic.
+
+**Built:**
+- Memory button and panel removed.
+- `EXTRACT_PROMPT` widened: decisions, events with dates, goals, habits, work focus,
+  wanted settings. Relative dates are resolved using today's date.
+- New `learn.reflect()` for patterns over recent messages (`turns.reflected`), run while
+  idle (every 5 min at most) and at session end.
+- Always-shown categories: health, diet, assistant, preference, pattern.
+- Speaker: `echoCancellation: false` (the root cause of call-mode routing), plus a 600 ms gap
+  before playback.
+- Robust audio decode, "tap again" for bad recordings, and a tiny-blob check on the page.
+- Speed: prompt ordering for cache reuse, `OLLAMA_NUM_PARALLEL=2`, LLM
+  download + load + warm-up as a background job during speech model loading.
+- UI: fixed top and bottom bars, a smaller mic, Whisper to the left of the mic.
+
+**Bug found by the new tests:** the privacy filter treated any 4+ digit number as private,
+so every fact containing a year ("bought a car in September 2026") was silently dropped.
+Dates (years, ISO and dd/mm/yyyy) are now allowed. PINs, cards, and phone numbers stay
+blocked, even when they contain a year-like group.
+
+**Tool note:** the command-approval service of the Claude Code session was down for a
+while. The owner ran the tests and pushed themselves (163 passed, 1 skipped).
+
+**Also this evening:**
+- Start button green but nothing started: fixed. It now checks the link, turns red with
+  advice, and has a `force` box.
+- 20-minute start-up guard, and download timeouts.
+
 ## Open items / next steps
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.
 - On a real phone, confirm: loudspeaker/Bluetooth playback, PWA install and offline Start button,

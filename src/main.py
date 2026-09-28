@@ -98,8 +98,12 @@ def _run(ctx: dict) -> None:
         print(f"[budget] warning: {m.name} is above {config.NOTIFY_AT:.0%}")
 
     # --- GPU setup --------------------------------------------------------------------
-    paths, llm_model = setup_env.prepare()
-    config.LLM_MODEL = llm_model
+    if config.WEB_SEARCH:  # before the LLM warms up in the background
+        import websearch
+        websearch.register()
+
+    # The LLM downloads, loads (GPU 0) and warms up in the background ...
+    paths, llm_job = setup_env.prepare()
 
     import llm
     import tunnel
@@ -109,34 +113,8 @@ def _run(ctx: dict) -> None:
     from stt import SpeechToText
     from tts import TextToSpeech
 
-    if config.WEB_SEARCH:
-        import websearch
-        websearch.register()
-
-    # Phase 5: fine-tuned model, if one is attached -> blind A/B test, then the winner
-    tuned = setup_env.install_tuned_model(key)
-    picker = llm.ModelPicker(llm_model, tuned, memory.rating_stats(),
-                             config.TUNED_MODE, config.AB_MIN_RATINGS)
-    if tuned:
-        stats = memory.rating_stats()
-        print(f"[models] base {llm_model}: 👍/👎 {stats.get(llm_model, (0, 0))}  |  "
-              f"tuned {tuned}: 👍/👎 {stats.get(tuned, (0, 0))}  ->  using: {picker.decision}")
-
-    # Load the LLM (GPU 0, ~2 min) at the same time as the speech models (GPU 1).
-    def preload_llm():
-        for model in picker.in_use():
-            t0 = time.time()
-            try:
-                llm.load_model(model)  # first load reads ~6 GB: allow several minutes
-                print(f"[setup] {model} loaded in {time.time() - t0:.0f}s")
-            except Exception as e:  # retried (with the fallback) in warm_up_llm below
-                print(f"[setup] {model} preload failed: {str(e)[:200]}")
-
+    # ... while the speech models load here (GPU 1); first calls are slow, so do them now.
     t = time.time()
-    preload = threading.Thread(target=preload_llm, daemon=True)
-    preload.start()
-
-    # --- speech models + warm-up (first calls are slow, so do them now) -------------
     device = f"cuda:{paths.speech_device_index}"
     memory.set_embedder(E5Embedder(paths.embed, device=device))
     stt = SpeechToText(paths.whisper, paths.speech_device_index)
@@ -146,7 +124,24 @@ def _run(ctx: dict) -> None:
     import numpy as np
     list(stt.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
     print(f"[setup] speech models ready in {time.time() - t:.0f}s")
-    preload.join()
+
+    try:
+        llm_model = llm_job.result()
+    except Exception as e:
+        print(f"[setup] LLM start failed: {str(e)[:200]}\n[setup] Ollama log:\n"
+              f"{setup_env.ollama_log_tail()}\n[setup] reinstalling Ollama and trying once more")
+        setup_env.reinstall_ollama_online()
+        llm_model = setup_env.ensure_llm()
+    config.LLM_MODEL = llm_model
+
+    # Phase 5: fine-tuned model, if one is attached -> blind A/B test, then the winner
+    tuned = setup_env.install_tuned_model(key)
+    picker = llm.ModelPicker(llm_model, tuned, memory.rating_stats(),
+                             config.TUNED_MODE, config.AB_MIN_RATINGS)
+    if tuned:
+        stats = memory.rating_stats()
+        print(f"[models] base {llm_model}: 👍/👎 {stats.get(llm_model, (0, 0))}  |  "
+              f"tuned {tuned}: 👍/👎 {stats.get(tuned, (0, 0))}  ->  using: {picker.decision}")
 
     def warm_up_llm():
         for model in picker.in_use():
@@ -173,7 +168,7 @@ def _run(ctx: dict) -> None:
         setup_env.reinstall_ollama_online()
         warm_up_llm()
     report_devices()
-    print(f"[setup] LLM warm-up done in {time.time() - t:.1f}s")
+    print(f"[setup] all models ready {time.time() - t:.0f}s after the speech models started")
 
     # --- web app + tunnel ---------------------------------------------------------
     assistant = Assistant(stt, tts, memory, store, timer, restart_ollama=setup_env.start_ollama,

@@ -147,6 +147,9 @@ def start_ollama(models_dir: Path | None = None) -> None:
            "OLLAMA_MODELS": str(_ollama_models_dir),
            "OLLAMA_KEEP_ALIVE": "60m",
            "OLLAMA_MAX_LOADED_MODELS": "2",  # base + fine-tuned during the A/B test
+           # 2 slots: the fact-learning call after a reply doesn't wipe the chat's
+           # reusable prompt, so the next question starts faster.
+           "OLLAMA_NUM_PARALLEL": "2",
            "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://")}
     subprocess.Popen(["ollama", "serve"], env=env,
                      stdout=open(config.WORK_DIR / "ollama.log", "a"), stderr=subprocess.STDOUT)
@@ -305,8 +308,9 @@ def model_paths(cache: Path | None) -> ModelPaths:
         return ModelPaths(*cached, speech_gpu)
 
 
-def prepare() -> tuple[ModelPaths, str]:
-    """Run everything. Returns (model paths, LLM model name)."""
+def prepare():
+    """Run everything. Returns (speech model paths, LLM job): the job is a Future that
+    gives the LLM model name once it is downloaded, loaded and warmed up."""
     config.WORK_DIR.mkdir(parents=True, exist_ok=True)
     cache = find_input(config.MODELS_MARKER)
     if cache:
@@ -332,11 +336,25 @@ def prepare() -> tuple[ModelPaths, str]:
     step("ollama install")
     start_ollama(models_dir)
     step("ollama start")
-    # The LLM (~6.6 GB) and the speech models (~2.4 GB) download at the same time.
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        llm_job = pool.submit(ensure_llm, cache, models_dir)
-        paths = model_paths(cache)
-        llm_model = llm_job.result()
-    step("models")
+    # The LLM gets downloaded, loaded onto GPU 0 and warmed up in the background, while
+    # the speech models download here (and then load onto GPU 1 in main.py).
+    pool = ThreadPoolExecutor(max_workers=1)
+    llm_job = pool.submit(_prepare_llm, cache, models_dir)
+    pool.shutdown(wait=False)
+    paths = model_paths(cache)
+    step("speech downloads")
     print(f"[setup] steps: {', '.join(steps)}")
-    return paths, llm_model
+    return paths, llm_job
+
+
+def _prepare_llm(cache: Path | None, models_dir: Path) -> str:
+    """Download + load + first answer of the LLM (the first answer is slow: GPU start-up)."""
+    import llm
+    model = ensure_llm(cache, models_dir)
+    t = time.time()
+    llm.load_model(model)
+    print(f"[setup] {model} loaded in {time.time() - t:.0f}s")
+    t = time.time()
+    "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model, max_tokens=5))
+    print(f"[setup] {model} first answer in {time.time() - t:.0f}s")
+    return model

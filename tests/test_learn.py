@@ -38,6 +38,39 @@ def test_correction_about_the_assistant_is_kept_and_always_shown(embedder, monke
     assert facts == ["The assistant needs internet; it cannot work offline."]
 
 
+def test_decisions_events_and_goals_are_learned_too(embedder, monkeypatch):
+    m = Memory(embedder)
+    fake_llm(monkeypatch, [
+        {"fact": "User bought a Honda City in September 2026.", "category": "event", "replaces": 0},
+        {"fact": "User decided to learn Python.", "category": "decision", "replaces": 0},
+        {"fact": "User wants to run a marathon next year.", "category": "goal", "replaces": 0}])
+    assert len(learn.learn(m, "I bought a Honda City yesterday and I decided to learn "
+                              "Python; my goal is a marathon", T0)) == 3
+    cats = {c for (c,) in m.conn.execute("SELECT category FROM facts")}
+    assert cats == {"event", "decision", "goal"}
+
+
+def test_patterns_are_found_over_recent_messages(embedder, monkeypatch):
+    m = Memory(embedder)
+    for i in range(7):
+        m.add_turn(f"help me with my kaggle voice assistant step {i}", "Sure.", "en", T0)
+    seen = fake_llm(monkeypatch, [{"fact": "User often works on their Kaggle voice assistant.",
+                                   "category": "other", "replaces": 0}])
+    assert learn.reflect(m, T0) == ["User often works on their Kaggle voice assistant."]
+    assert seen["prompt"] == learn.REFLECT_PROMPT and "step 6" in seen["text"]
+    row = m.conn.execute("SELECT category FROM facts").fetchone()
+    assert row == ("pattern",)                      # always stored as a pattern
+    assert m.unreflected_turns(50) == []            # those messages won't be reviewed again
+    assert learn.reflect(m, T0) == []               # nothing new -> no call
+
+
+def test_too_few_messages_for_patterns(embedder, monkeypatch):
+    m = Memory(embedder)
+    m.add_turn("hello", "Hi.", "en", T0)
+    fake_llm(monkeypatch, [{"fact": "x", "category": "pattern", "replaces": 0}])
+    assert learn.reflect(m, T0) == []
+
+
 def test_assistant_knows_it_needs_internet():
     from llm import system_prompt
     prompt = system_prompt("en", [], [], T0)
@@ -48,8 +81,10 @@ def test_assistant_knows_it_needs_internet():
 def fake_llm(monkeypatch, facts):
     seen = {}
 
-    def ask(user_text, known):
+    def ask(user_text, known, now=None, **kwargs):
         seen["known"] = known
+        seen["prompt"] = kwargs.get("prompt", learn.EXTRACT_PROMPT)
+        seen["text"] = user_text
         return facts
     monkeypatch.setattr(learn, "_ask_llm", ask)
     return seen
@@ -156,7 +191,20 @@ def test_links_are_sent_to_the_page_but_never_spoken(embedder, monkeypatch):
     assert tts.spoken == ["Here it is:"]
 
 
-def test_learned_facts_are_shown(embedder, monkeypatch):
-    events, _ = run_turn(embedder, monkeypatch, "I am allergic to peanuts", ["Noted."],
-                         learned=["User is allergic to peanuts."])
-    assert {"type": "learned", "facts": ["User is allergic to peanuts."]} in events
+def test_learning_happens_quietly_in_the_background(embedder, monkeypatch):
+    seen = []
+    monkeypatch.setattr(app_module.llm, "stream_reply", lambda m, model=None: iter(["Noted."]))
+
+    def slow_learn(memory, text, now):
+        seen.append(text)
+        return ["User is allergic to peanuts."]
+    monkeypatch.setattr(app_module.learn, "learn", slow_learn)
+    assistant = app_module.Assistant(FakeSTT("I am allergic to peanuts"), FakeTTS(),
+                                     Memory(embedder), FakeStore(),
+                                     SessionTimer(datetime.now(IST), 600))
+    body = TestClient(app_module.create_app(assistant)).post("/api/turn", content=b"a").text
+    events = [json.loads(l) for l in body.splitlines() if l.strip()]
+    assert not any(e["type"] == "learned" for e in events)  # nothing shown in the chat
+    assistant.learn_thread.join(timeout=5)
+    assert seen == ["I am allergic to peanuts"]
+    assert not assistant.turn_lock.locked()  # the next question is never blocked
