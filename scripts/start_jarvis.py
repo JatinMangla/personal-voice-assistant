@@ -22,13 +22,14 @@ Names can be changed with environment variables (defaults in brackets):
     JARVIS_EXTRA      more notebook slugs to attach, comma separated,
                       e.g. your fine-tune notebook after Phase 5          []
 """
-import base64
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -140,6 +141,61 @@ def kaggle(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["kaggle", *args], capture_output=True, text=True)
 
 
+IST = timezone(timedelta(hours=5, minutes=30))  # India has no daylight saving time
+
+
+def fetch_usage(user: str, memory_key: str) -> dict | None:
+    """The usage numbers Jarvis saved next to its memory (GPU seconds per day, link
+    counts; never conversations). None if they can't be read: Jarvis then checks
+    the limits itself at start, as before."""
+    import config
+    import crypto
+    dataset = f"{user}/{config.MEMORY_DATASET_SLUG}"
+    with tempfile.TemporaryDirectory() as tmp:
+        result = kaggle("datasets", "download", dataset, "-f", config.USAGE_FILE_NAME,
+                        "-p", tmp, "--force")
+        if result.returncode != 0:
+            return None
+        for path in Path(tmp).rglob("*"):
+            if path.suffix == ".zip":  # Kaggle may send a single file zipped
+                with zipfile.ZipFile(path) as z:
+                    z.extractall(tmp)
+        files = list(Path(tmp).rglob(config.USAGE_FILE_NAME))
+        if not files:
+            return None
+        try:
+            return json.loads(crypto.decrypt(files[0].read_bytes(), crypto.load_key(memory_key)))
+        except Exception:
+            return None
+
+
+def limit_blocker(user: str, memory_key: str, now: datetime | None = None) -> str | None:
+    """Why starting now would go past a free limit, or None. Same rule as the notebook
+    (budget.start_blocker), checked BEFORE a GPU machine is started."""
+    import config
+    from budget import Budget, SnapshotUsage, current_meters, describe_reset, start_blocker
+    snapshot = fetch_usage(user, memory_key)
+    if snapshot is None:
+        print("Could not read the saved usage numbers; Jarvis will check its free limits "
+              "itself when it starts.")
+        return None
+    now = now or datetime.now(IST)
+    usage = SnapshotUsage(snapshot)
+    today = now.date().isoformat()  # a start costs the machine's start-up time too
+    usage.days[today] = usage.days.get(today, 0.0) + config.SESSION_OVERHEAD_MIN * 60
+    meters = current_meters(usage, now)
+    blocked = start_blocker(meters, Budget(config.NOTIFY_AT, config.STOP_AT))
+    if not blocked:
+        day = next(m for m in meters if m.name == "day")
+        print(f"Free limits OK (GPU today {day.percent}% used).")
+        return None
+    names = {"day": "today's GPU time", "week": "the GPU time of the last 7 days",
+             "requests": "this month's free link requests", "data": "this month's free link data"}
+    return (f"NOT started: {names[blocked.name]} is at {blocked.percent}% of the free limit "
+            f"(Jarvis stops itself at {config.STOP_AT:.0%}, so this stays free). "
+            f"{describe_reset(blocked, now)} No GPU time was used.")
+
+
 def upload_secrets(user: str, secrets: dict) -> str:
     """Encrypt the secrets with a fresh key, upload them, return the key (base64)."""
     import crypto
@@ -188,6 +244,10 @@ def main() -> None:
             "- If a Kaggle editor tab of Jarvis is open: stop that session (power icon), close "
             "the tab, and press Start again.\n"
             "- Otherwise an older run is stuck: press 'Run workflow' again with 'force' ticked.")
+
+    blocked = limit_blocker(s["user"], secrets["MEMORY_KEY"])
+    if blocked:
+        sys.exit(blocked)
 
     run_key = upload_secrets(s["user"], secrets)
     print("Encrypted secrets uploaded.")

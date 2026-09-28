@@ -21,7 +21,7 @@ import llm
 import tools
 import websearch
 from budget import (Budget, Meter, current_meters, describe_reset, minutes_until_stop,
-                    usage_summary)
+                    usage_snapshot, usage_summary)
 from intents import parse_command, parse_confirmation
 from stt import AudioUnreadable
 
@@ -314,7 +314,7 @@ class Assistant:
             try:
                 data = self.memory.to_bytes()
                 size = len(data)
-                ok = self.store.save(data)
+                ok = self.store.save(data, usage_snapshot(self.memory, now_ist()))
             except Exception as e:
                 print(f"[memory] save error: {type(e).__name__}: {str(e)[:200]}")
                 ok = False

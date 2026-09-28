@@ -13,7 +13,8 @@ class FakeStore:
     def __init__(self):
         self.saved = []
 
-    def save(self, data):
+    def save(self, data, usage=None):
+        self.usage = usage
         self.saved.append(data)
         return True
 

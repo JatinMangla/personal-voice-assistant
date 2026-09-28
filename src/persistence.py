@@ -64,18 +64,23 @@ class MemoryStore:
             return True
         return self._kaggle("datasets", "status", self.dataset).returncode == 0
 
-    def save(self, plaintext: bytes, attempts: int = 3) -> bool:
+    def save(self, plaintext: bytes, usage: dict | None = None, attempts: int = 3) -> bool:
+        """Upload the encrypted memory. `usage` (budget.usage_snapshot) is saved next to
+        it as its own small encrypted file, for the Start button's limit check."""
         if self.blocked:
             return False
         blob = crypto.encrypt(plaintext, self.key)
         if crypto.decrypt(blob, self.key) != plaintext:  # never upload a broken file
             raise StorageError("Encryption self-check failed.")
         self._write_backup(blob)
+        usage_blob = crypto.encrypt(json.dumps(usage).encode(), self.key) if usage else None
 
         for attempt in range(1, attempts + 1):
             with tempfile.TemporaryDirectory() as tmp:
                 folder = Path(tmp)
                 (folder / config.MEMORY_FILE_NAME).write_bytes(blob)
+                if usage_blob:
+                    (folder / config.USAGE_FILE_NAME).write_bytes(usage_blob)
                 (folder / "dataset-metadata.json").write_text(json.dumps({
                     "title": config.MEMORY_DATASET_SLUG,
                     "id": self.dataset,

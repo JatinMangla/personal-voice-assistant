@@ -161,7 +161,8 @@ class FakeTTS:
 class FakeStore:
     last_saved = None
 
-    def save(self, data):
+    def save(self, data, usage=None):
+        self.usage = usage
         return True
 
 

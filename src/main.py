@@ -39,7 +39,8 @@ def _record_failed_start(ctx: dict) -> None:
     try:
         now = datetime.now(ZoneInfo(config.TIMEZONE))
         ctx["memory"].add_usage(*ctx["timer"].tick(now))
-        ok = ctx["store"].save(ctx["memory"].to_bytes())
+        from budget import usage_snapshot
+        ok = ctx["store"].save(ctx["memory"].to_bytes(), usage_snapshot(ctx["memory"], now))
         print(f"[budget] GPU time of this failed start {'recorded' if ok else 'NOT recorded'}")
     except Exception as e:
         print(f"[budget] could not record GPU time: {type(e).__name__}: {e}")
@@ -51,7 +52,8 @@ def _run(ctx: dict) -> None:
     setup_env.install_basics()
 
     import crypto
-    from budget import Budget, current_meters, describe_reset, minutes_until_stop
+    from budget import (Budget, current_meters, describe_reset, minutes_until_stop,
+                        start_blocker, usage_snapshot)
     from memory import Memory
     from persistence import MemoryStore
     from timer import SessionTimer
@@ -85,12 +87,12 @@ def _run(ctx: dict) -> None:
         left = minutes_until_stop(m, config.STOP_AT)
         print(f"[budget] {m.name:8} {m.percent:3d}% of free limit"
               + (f"  ({left} min until auto-stop)" if left is not None else ""))
-    blocked = budget.over_stop(meters) or budget.too_little_left(meters, config.MIN_START_MIN)
+    blocked = start_blocker(meters, budget)
     if blocked:
         print(f"\n[budget] NOT STARTING: '{blocked.name}' is at {blocked.percent}% of its free "
               f"limit (auto-stop at {config.STOP_AT:.0%}). This keeps the project free. "
               f"{describe_reset(blocked, now)}")
-        store.save(memory.to_bytes())  # record this short session's GPU time
+        store.save(memory.to_bytes(), usage_snapshot(memory, now))  # record this GPU time
         ctx["ready"] = True  # already recorded
         return
     for m in budget.warnings(meters):

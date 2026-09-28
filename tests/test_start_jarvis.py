@@ -94,6 +94,7 @@ def fake_kaggle_calls(env, answers):
 def test_full_start_uploads_secrets_then_pushes_and_retries(env):
     calls = fake_kaggle_calls(env, [
         (0, 'jatinmangla123/jarvis has status "KernelWorkerStatus.COMPLETE"'),  # kernel status
+        (1, "404 - Not Found"),                                    # usage numbers (none yet)
         (0, "ready"),                                                            # secrets exist?
         (0, "Dataset version is being created."),                               # upload
         (0, "ready"),                                                            # processed
@@ -101,10 +102,11 @@ def test_full_start_uploads_secrets_then_pushes_and_retries(env):
         (0, "Kernel version 12 successfully pushed."),                          # push 2
     ])
     start_jarvis.main()
-    assert [c[:2] for c in calls] == [("kernels", "status"), ("datasets", "status"),
+    assert [c[:2] for c in calls] == [("kernels", "status"), ("datasets", "download"),
+                                      ("datasets", "status"),
                                       ("datasets", "version"), ("datasets", "status"),
                                       ("kernels", "push"), ("kernels", "push")]
-    assert "--delete-old-versions" in calls[2]
+    assert "--delete-old-versions" in calls[3]
 
 
 def test_already_running_and_reachable_does_nothing(env):
@@ -126,7 +128,7 @@ def test_running_but_link_offline_turns_red_with_advice(env):
 def test_force_starts_even_if_kaggle_says_running(env):
     env.setenv("JARVIS_FORCE", "true")
     calls = fake_kaggle_calls(env, [
-        (0, 'has status "KernelWorkerStatus.RUNNING"'),
+        (0, 'has status "KernelWorkerStatus.RUNNING"'), (1, "404"),
         (0, "ready"), (0, "Dataset version is being created."), (0, "ready"),
         (0, "Kernel version 13 successfully pushed.")])
     start_jarvis.main()
@@ -147,3 +149,64 @@ def test_push_error_text_counts_as_failure():
 ])
 def test_already_running_detection(output, running):
     assert start_jarvis.is_running(output) is running
+
+
+# --- free-limit check before starting (no GPU time used) ------------------------------
+IST = start_jarvis.IST
+NOW = start_jarvis.datetime(2026, 9, 28, 21, 0, tzinfo=IST)
+
+
+def usage_download(env, snapshot, key=None):
+    """kaggle datasets download -f usage.json.enc, answered with this snapshot."""
+    key = crypto.load_key(key or SECRETS["MEMORY_KEY"])
+    calls = []
+
+    def fake(*args):
+        calls.append(args)
+        if args[:2] == ("datasets", "download"):
+            folder = Path(args[args.index("-p") + 1])
+            (folder / config.USAGE_FILE_NAME).write_bytes(
+                crypto.encrypt(json.dumps(snapshot).encode(), key))
+            return start_jarvis.subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+        raise AssertionError(f"unexpected kaggle call {args}")
+
+    env.setattr(start_jarvis, "kaggle", fake)
+    return calls
+
+
+def test_day_limit_used_up_refuses_before_any_gpu_run(env):
+    daily = config.DAILY_LIMIT_MIN * 60
+    calls = usage_download(env, {"days": {"2026-09-28": daily * 0.97}, "net": {}})
+    why = start_jarvis.limit_blocker("me", SECRETS["MEMORY_KEY"], NOW)
+    assert "today's GPU time is at 9" in why and "12:00 AM" in why and "No GPU time" in why
+    assert calls[0][:3] == ("datasets", "download", "me/assistant-memory")
+    assert config.USAGE_FILE_NAME in calls[0]  # only the numbers file, never the memory
+
+
+def test_week_limit_counts_the_last_7_days(env):
+    days = {f"2026-09-{d:02d}": config.GPU_WEEKLY_HOURS * 3600 / 6 * 0.99 for d in range(22, 28)}
+    usage_download(env, {"days": days, "net": {}})
+    assert "7 days" in start_jarvis.limit_blocker("me", SECRETS["MEMORY_KEY"], NOW)
+
+
+def test_plenty_left_allows_start(env):
+    usage_download(env, {"days": {"2026-09-28": 600, "2026-09-20": 99999}, "net": {"2026-09": [50, 10]}})
+    assert start_jarvis.limit_blocker("me", SECRETS["MEMORY_KEY"], NOW) is None
+
+
+def test_link_requests_used_up_refuses(env):
+    usage_download(env, {"days": {}, "net": {"2026-09": [19_900, 0]}})
+    assert "link requests" in start_jarvis.limit_blocker("me", SECRETS["MEMORY_KEY"], NOW)
+
+
+def test_unreadable_usage_lets_the_notebook_decide(env):
+    usage_download(env, {"days": {}}, key=crypto.generate_key())  # other key: can't decrypt
+    assert start_jarvis.limit_blocker("me", SECRETS["MEMORY_KEY"], NOW) is None
+
+
+def test_main_stops_when_limit_is_used_up(env):
+    env.setattr(start_jarvis, "limit_blocker", lambda user, key: "NOT started: used up.")
+    calls = fake_kaggle_calls(env, [(0, 'has status "KernelWorkerStatus.COMPLETE"')])
+    with pytest.raises(SystemExit, match="NOT started"):
+        start_jarvis.main()
+    assert len(calls) == 1  # nothing uploaded, nothing pushed

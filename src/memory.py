@@ -530,6 +530,12 @@ class Memory:
             ).fetchone()
         return row[0]
 
+    def usage_days(self, first_day: str) -> dict[str, float]:
+        """{day: seconds} from `first_day` (YYYY-MM-DD) on."""
+        with self.lock:
+            return dict(self.conn.execute(
+                "SELECT day, seconds FROM usage WHERE day >= ?", (first_day,)).fetchall())
+
     def add_usage(self, day: str, seconds: float) -> None:
         with self.lock:
             self.conn.execute(

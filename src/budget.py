@@ -134,3 +134,40 @@ class Budget:
         new = [m for m in self.warnings(meters) if m.name not in self.notified]
         self.notified.update(m.name for m in new)
         return new
+
+
+# --- a numbers-only copy of the usage, for the Start button ---------------------------
+# Saved next to the memory as its own small encrypted file, so the GitHub Start button
+# can refuse to start (before any GPU time is used) without ever opening the memory
+# itself: it holds GPU seconds per day and link counts, nothing else.
+SNAPSHOT_DAYS = 8
+
+
+def usage_snapshot(memory, now: datetime) -> dict:
+    first = (now.date() - timedelta(days=SNAPSHOT_DAYS - 1)).isoformat()
+    month = now.strftime("%Y-%m")
+    return {"version": 1, "saved": now.isoformat(timespec="seconds"),
+            "days": memory.usage_days(first), "net": {month: list(memory.get_net(month))}}
+
+
+class SnapshotUsage:
+    """Reads a usage snapshot like a Memory, so current_meters() works on it."""
+
+    def __init__(self, snapshot: dict):
+        self.days = {d: float(s) for d, s in snapshot.get("days", {}).items()}
+        self.net = {m: tuple(v) for m, v in snapshot.get("net", {}).items()}
+
+    def get_usage(self, day: str) -> float:
+        return self.days.get(day, 0.0)
+
+    def get_usage_since(self, first_day: str) -> float:
+        return sum(s for d, s in self.days.items() if d >= first_day)
+
+    def get_net(self, month: str) -> tuple[int, int]:
+        return self.net.get(month, (0, 0))
+
+
+def start_blocker(meters: list[Meter], budget: "Budget") -> Meter | None:
+    """The limit that forbids starting now, if any: already at the auto-stop, or too
+    little left for a session (start-up alone takes a few minutes)."""
+    return budget.over_stop(meters) or budget.too_little_left(meters, config.MIN_START_MIN)

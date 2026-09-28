@@ -70,6 +70,7 @@ SPEECH_GPU_INDEX = 1
 # --- Memory --------------------------------------------------------------
 MEMORY_DATASET_SLUG = "assistant-memory"
 MEMORY_FILE_NAME = "memory.db.enc"
+USAGE_FILE_NAME = "usage.json.enc"  # usage numbers only, for the Start button's check
 MEMORY_TOP_K = 5
 MEMORY_MIN_SIMILARITY = 0.80  # e5 scores are high overall; below this = unrelated
 ALL_FACTS_LIMIT = 50          # max facts in the prompt (health/diet/corrections always)
