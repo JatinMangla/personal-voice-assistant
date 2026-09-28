@@ -117,6 +117,8 @@ def _run(ctx: dict) -> None:
     push = reminders_module.Push(ntfy_topic, config.NTFY_SERVER) if ntfy_topic else None
     reminders = reminders_module.Reminders(memory, push)
     reminders_module.register(reminders, lambda: datetime.now(ZoneInfo(config.TIMEZONE)))
+    import home  # home devices + cameras, only if HA_URL and HA_TOKEN are set
+    home.setup()
 
     # The LLM downloads, loads (GPU 0) and warms up in the background ...
     paths, llm_job = setup.prepare()

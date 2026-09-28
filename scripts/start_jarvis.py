@@ -40,7 +40,8 @@ SECRETS_FILE = "jarvis-secrets.enc"  # same name as config.SECRETS_BUNDLE_FILE
 # What the notebook needs. Required ones must be set as GitHub repository secrets.
 REQUIRED = ["KAGGLE_USERNAME", "KAGGLE_API_TOKEN", "MEMORY_KEY", "NGROK_AUTHTOKEN",
             "NGROK_DOMAIN"]
-OPTIONAL = ["ALLOWED_EMAIL", "APP_PASSWORD", "START_URL", "NTFY_TOPIC"]
+OPTIONAL = ["ALLOWED_EMAIL", "APP_PASSWORD", "START_URL", "NTFY_TOPIC", "HA_URL", "HA_TOKEN",
+            "HOME_DEVICES"]
 RUN_KEY_LINE = 'RUN_KEY = ""'
 
 

@@ -30,9 +30,19 @@ class Tool:
     parameters: dict  # JSON schema of the arguments
     func: Callable[..., str]
     requires_confirmation: bool = True
-    # How the confirmation question describes the action, e.g. "turn off the {entity}".
+    # How the confirmation question describes the action, e.g. "{action} the {device}".
     # Filled with the call's arguments; the tool name is used when empty.
     confirm_text: str = ""
+    # Per call instead of always: e.g. a light needs no "yes", the air fryer does.
+    confirm_if: Callable[[dict], bool] | None = None
+
+    def needs_confirmation(self, arguments: dict) -> bool:
+        if self.confirm_if is not None:
+            try:
+                return bool(self.confirm_if(arguments))
+            except Exception:
+                return True  # when in doubt, ask
+        return self.requires_confirmation
 
 
 @dataclass
@@ -43,9 +53,10 @@ class PendingAction:
 
     def describe(self) -> str:
         tool = REGISTRY.get(self.name)
+        words = {k: str(v).replace("_", " ") for k, v in self.arguments.items()}
         try:
-            return (tool.confirm_text or "").format(**self.arguments) or self.name
-        except (KeyError, IndexError, ValueError):
+            return (tool.confirm_text or "").format(**words) or self.name
+        except (KeyError, IndexError, ValueError, AttributeError):
             return self.name
 
 
@@ -73,7 +84,7 @@ def run(name: str, arguments: dict, confirmed: bool = False) -> str:
         return f"Unknown tool '{name}'."
     if not isinstance(arguments, dict):
         arguments = {}
-    if tool.requires_confirmation and not confirmed:
+    if not confirmed and tool.needs_confirmation(arguments):
         pending = PendingAction(name, arguments, time.time())
         return (f"Not done yet: this needs the user's spoken yes. Ask ONE short question, "
                 f"e.g. \"Should I {pending.describe()}?\", and stop. It runs only if the "
@@ -105,3 +116,17 @@ def confirm() -> tuple[bool, str]:
 def cancel() -> None:
     global pending
     pending = None
+
+
+# --- pictures a tool fetched (a camera snapshot) for the model to look at ----------------
+_images: list[tuple[str, str]] = []  # (note, base64 JPEG); used once, never stored
+
+
+def attach_image(jpeg_b64: str, note: str) -> None:
+    _images.append((note, jpeg_b64))
+
+
+def take_images() -> list[tuple[str, str]]:
+    found = list(_images)
+    _images.clear()
+    return found

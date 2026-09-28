@@ -149,6 +149,8 @@ def stream_reply(messages: list[dict], model: str | None = None,
             fn = call.get("function", {})
             result = tools.run(fn.get("name", ""), fn.get("arguments") or {})
             messages.append({"role": "tool", "content": result, "tool_name": fn.get("name", "")})
+        for note, image in tools.take_images():  # e.g. a camera snapshot: seen once, not kept
+            messages.append({"role": "user", "content": note, "images": [image]})
 
 
 _SENTENCE_END = re.compile(r"(?<=[.!?।])\s+|\n+")

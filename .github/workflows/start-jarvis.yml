@@ -36,6 +36,9 @@ jobs:
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           START_URL: ${{ secrets.START_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          HA_URL: ${{ secrets.HA_URL }}
+          HA_TOKEN: ${{ secrets.HA_TOKEN }}
+          HOME_DEVICES: ${{ secrets.HOME_DEVICES }}
           JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
           JARVIS_FORCE: ${{ inputs.force }}
           JARVIS_EXTRA: ${{ vars.JARVIS_EXTRA || '' }}
