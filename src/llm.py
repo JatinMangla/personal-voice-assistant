@@ -81,6 +81,7 @@ def build_messages(user_text: str, lang: str, facts: list[str], related: list[st
     return messages
 
 
+MAX_TOOL_ROUNDS = 3  # then the model must answer with what it found
 _NO_THINK_OPTION: set[str] = set()  # models that reject the "think" setting
 LAST_STATS: dict = {}  # speed numbers of the last reply (Ollama's final message)
 
@@ -90,7 +91,7 @@ def stream_reply(messages: list[dict], model: str | None = None,
     """Yield reply text pieces as the model writes them. Runs registered tools."""
     model = model or config.LLM_MODEL
     messages = list(messages)
-    for _ in range(3):  # at most 3 rounds of tool calls
+    for round_no in range(MAX_TOOL_ROUNDS + 1):
         payload = {
             "model": model,
             "messages": messages,
@@ -101,7 +102,7 @@ def stream_reply(messages: list[dict], model: str | None = None,
         }
         if model not in _NO_THINK_OPTION:
             payload["think"] = False  # no hidden reasoning: much faster for voice
-        if tools.REGISTRY:
+        if tools.REGISTRY and round_no < MAX_TOOL_ROUNDS:  # last round: answer in words
             payload["tools"] = tools.ollama_specs()
 
         tool_calls = []
@@ -124,7 +125,8 @@ def stream_reply(messages: list[dict], model: str | None = None,
                     LAST_STATS.clear()
                     LAST_STATS.update({k: chunk.get(k, 0) for k in
                                        ("prompt_eval_count", "prompt_eval_duration",
-                                        "eval_count", "eval_duration", "total_duration")})
+                                        "eval_count", "eval_duration", "total_duration",
+                                        "load_duration")})
                 message = chunk.get("message", {})
                 tool_calls += message.get("tool_calls") or []
                 if message.get("content"):
@@ -208,8 +210,10 @@ def speed_report() -> str:
     if not s.get("eval_duration"):
         return "no speed data"
     rate = s["eval_count"] / (s["eval_duration"] / 1e9)
+    load = s.get("load_duration", 0) / 1e9
     return (f"reply {s['eval_count']} tokens at {rate:.1f} tokens/s, "
-            f"prompt {s['prompt_eval_count']} tokens in {s['prompt_eval_duration'] / 1e9:.1f}s")
+            f"prompt {s['prompt_eval_count']} tokens in {s['prompt_eval_duration'] / 1e9:.1f}s"
+            + (f", model load {load:.1f}s" if load >= 0.5 else ""))
 
 
 def load_model(model: str, timeout: float = 600) -> None:

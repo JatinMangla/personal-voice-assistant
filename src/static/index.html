@@ -259,6 +259,8 @@ function enqueueAudio(b64OrBuffer, myTurn) {
 }
 
 // ---------- recording with automatic stop on silence ----------
+const RECORDING_TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"];
+
 async function startListening() {
   stopPlayback();
   setAudioSession("play-and-record");
@@ -278,7 +280,14 @@ async function startListening() {
   micCtx = new (window.AudioContext || window.webkitAudioContext)();
   if (micCtx.state === "suspended") await micCtx.resume();
   chunks = [];
-  recorder = new MediaRecorder(stream);
+  // Ask for a format the server decodes well (Opus in WebM/Ogg, else MP4 on iPhones)
+  // instead of leaving it to the browser.
+  const type = RECORDING_TYPES.find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  recorder = type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+  // The mic can vanish mid-question (Bluetooth switch, screen lock): stop cleanly then.
+  stream.getAudioTracks().forEach((t) => t.addEventListener("ended", () => {
+    if (recorder && recorder.state === "recording") recorder.stop();
+  }));
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   recorder.onstop = onRecordingDone;
   recorder.start(250);

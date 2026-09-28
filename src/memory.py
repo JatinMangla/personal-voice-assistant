@@ -2,12 +2,24 @@
 
 The database lives only in RAM (SQLite ":memory:"). It is turned into bytes with
 to_bytes(), encrypted, and uploaded by persistence.py. Plain text never touches disk.
+
+Finding related memories is a hybrid search (see docs/MEMORY_RESEARCH.md):
+- meaning: multilingual vectors ("allergy" also finds "एलर्जी");
+- keywords: an FTS5 (BM25) index, for names and numbers that vectors blur;
+- both rankings merged by Reciprocal Rank Fusion, plus a small boost for recent turns;
+- date and category hints ("last week", "my decisions") filter before ranking.
+The keyword index lives in TEMP tables: rebuilt at every start (fast), never saved, so
+it adds nothing to the uploaded file and leaves no trace of forgotten text in it.
 """
 import sqlite3
 import threading
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime
 
 import numpy as np
+
+import config
+import query_hints
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS turns (
@@ -36,6 +48,24 @@ CREATE TABLE IF NOT EXISTS net_usage (
 );
 """
 
+# Hindi vowel signs are "marks" (M*), not letters: without M* the index would cut
+# Devanagari words into pieces.
+FTS_TOKENIZER = "unicode61 remove_diacritics 2 categories 'L* N* Co M*'"
+KEYWORD_INDEX = f"""
+CREATE VIRTUAL TABLE temp.facts_fts USING fts5(text, tokenize="{FTS_TOKENIZER}");
+CREATE VIRTUAL TABLE temp.turns_fts USING fts5(text, tokenize="{FTS_TOKENIZER}");
+INSERT INTO temp.facts_fts(rowid, text) SELECT id, text FROM main.facts;
+INSERT INTO temp.turns_fts(rowid, text) SELECT id, user_text || ' ' || reply FROM main.turns;
+CREATE TEMP TRIGGER facts_fts_add AFTER INSERT ON main.facts BEGIN
+    INSERT INTO facts_fts(rowid, text) VALUES (new.id, new.text); END;
+CREATE TEMP TRIGGER facts_fts_del AFTER DELETE ON main.facts BEGIN
+    DELETE FROM facts_fts WHERE rowid = old.id; END;
+CREATE TEMP TRIGGER turns_fts_add AFTER INSERT ON main.turns BEGIN
+    INSERT INTO turns_fts(rowid, text) VALUES (new.id, new.user_text || ' ' || new.reply); END;
+CREATE TEMP TRIGGER turns_fts_del AFTER DELETE ON main.turns BEGIN
+    DELETE FROM turns_fts WHERE rowid = old.id; END;
+"""
+
 
 class E5Embedder:
     """multilingual-e5 needs "query: " / "passage: " prefixes."""
@@ -62,6 +92,52 @@ def _from_blob(blob: bytes) -> np.ndarray:
     return np.frombuffer(blob, dtype=np.float32)
 
 
+def rrf(*rankings: list, k: int = 60) -> dict:
+    """Reciprocal Rank Fusion: {item: score}. Items ranked high in any list win; items
+    found by both searches win most. Scores don't need to be comparable."""
+    scores: dict = {}
+    for ranking in rankings:
+        for rank, item in enumerate(ranking):
+            scores[item] = scores.get(item, 0.0) + 1.0 / (k + rank + 1)
+    return scores
+
+
+@dataclass
+class _TurnVectors:
+    """All turn embeddings as one matrix (built once, then appended to), so searching
+    thousands of turns is one matrix product instead of a Python loop."""
+    ids: np.ndarray
+    days: np.ndarray  # "YYYY-MM-DD" per row, for date filters
+    matrix: np.ndarray
+
+
+SEARCH_CANDIDATES = 30   # from each search, before fusing
+RECENCY_BOOST = 0.004     # about a quarter of a first place in RRF, for a turn from today
+RECENCY_HALF_LIFE_DAYS = 30
+
+
+def _plain_hints(query: str) -> query_hints.Hints:
+    """Keywords only (no date or category rules), for callers without a clock."""
+    return query_hints.Hints(terms=query_hints.keyword_terms(query))
+
+
+def _in_range(ts: str | None, date_range: tuple[date, date] | None) -> bool:
+    if not date_range or not ts:
+        return False
+    return date_range[0].isoformat() <= ts[:10] < date_range[1].isoformat()
+
+
+def _fts(term: str) -> str:
+    """A safe FTS5 term: quoted (so words like OR/NEAR stay plain words), * = prefix."""
+    word = term.rstrip("*").replace('"', "")
+    return f'"{word}"*' if term.endswith("*") else f'"{word}"'
+
+
+def _short(text: str, limit: int = 300) -> str:
+    """Old conversations in the prompt stay short: a long answer is cut."""
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + " …"
+
+
 class Memory:
     def __init__(self, embedder, data: bytes | None = None):
         self.embedder = embedder
@@ -78,6 +154,17 @@ class Memory:
         self._add_column("turns", "reflected", "INTEGER DEFAULT 0")  # patterns looked for?
         self._add_column("facts", "category", "TEXT")   # health, diet, person, ...
         self._add_column("facts", "source", "TEXT")     # "user" (said "remember") or "auto"
+        self.keyword_index = self._build_keyword_index()
+        self._vectors: _TurnVectors | None = None  # built on first search
+        self._last_query: tuple[str, np.ndarray] | None = None
+
+    def _build_keyword_index(self) -> bool:
+        try:
+            self.conn.executescript(KEYWORD_INDEX)
+            return True
+        except sqlite3.OperationalError as e:  # SQLite without FTS5: vectors only
+            print(f"[memory] keyword search unavailable ({e}); using meaning search only")
+            return False
 
     def _add_column(self, table: str, column: str, kind: str) -> None:
         """Upgrade databases saved by older versions."""
@@ -106,6 +193,11 @@ class Memory:
             )
             self.conn.commit()
             self.dirty = True
+            if self._vectors is not None:
+                v = self._vectors
+                self._vectors = _TurnVectors(
+                    np.append(v.ids, cur.lastrowid), np.append(v.days, now.date().isoformat()),
+                    np.vstack([v.matrix, emb[None, :]]) if len(v.ids) else emb[None, :])
             return cur.lastrowid
 
     # --- ratings and fine-tuning data (Phase 5) ----------------------------------
@@ -164,25 +256,39 @@ class Memory:
             ).fetchall()
         return [r[0] for r in reversed(rows)]
 
-    def facts_for_prompt(self, query: str, limit: int,
-                         always_categories: tuple[str, ...]) -> list[str]:
+    def facts_for_prompt(self, query: str, limit: int, always_categories: tuple[str, ...],
+                         hints: query_hints.Hints | None = None,
+                         preferred_categories: tuple[str, ...] = ()) -> list[str]:
         """Facts to show the LLM for this question. Always: facts you asked it to
         remember and health/diet facts (e.g. allergies), so it can warn you even when
-        you don't mention them. Then the learned facts most related to the question."""
+        you don't mention them. Then, up to `limit` in total: facts of an asked-about
+        category ("my decisions"), then preferred categories (preferences, patterns),
+        then the rest, each group by hybrid rank."""
+        hints = hints or _plain_hints(query)
         with self.lock:
             rows = self.conn.execute(
-                "SELECT text, category, source, emb FROM facts ORDER BY id").fetchall()
-        always = [t for t, cat, src, _ in rows if src != "auto" or cat in always_categories]
-        others = [(t, e) for t, cat, src, e in rows if not (src != "auto" or cat in always_categories)]
+                "SELECT id, text, category, source, ts, emb FROM facts ORDER BY id").fetchall()
+        shown_always = lambda cat, src: src != "auto" or cat in always_categories  # noqa: E731
+        always = [t for _, t, cat, src, _, _ in rows if shown_always(cat, src)]
+        others = [(fid, t, cat, ts, e) for fid, t, cat, src, ts, e in rows
+                  if not shown_always(cat, src)]
         room = max(0, limit - len(always))
-        if others and room:
-            q = self.embedder.embed_query(query)
-            others.sort(key=lambda te: float(np.dot(q, _from_blob(te[1]))), reverse=True)
-        return always + [t for t, _ in others[:room]]
+        if not others or not room:
+            return always
+        q = self._embed_query(query)
+        by_meaning = [r[0] for r in sorted(
+            others, key=lambda r: -float(np.dot(q, _from_blob(r[4]))) if r[4] else 1.0)]
+        allowed = {r[0] for r in others}
+        by_words = [fid for fid in self._keyword_ids("facts_fts", hints.terms, 50) if fid in allowed]
+        in_range = [r[0] for r in reversed(others) if _in_range(r[3], hints.date_range)]
+        score = rrf(by_meaning, by_words, in_range)
+        others.sort(key=lambda r: (r[2] in hints.categories, r[2] in preferred_categories,
+                                   score.get(r[0], 0.0)), reverse=True)
+        return always + [r[1] for r in others[:room]]
 
     def similar_facts(self, text: str, k: int) -> list[tuple[int, str, float]]:
         """(id, text, similarity) of the k facts most like `text`."""
-        q = self.embedder.embed_query(text)
+        q = self._embed_query(text)
         with self.lock:
             rows = self.conn.execute("SELECT id, text, emb FROM facts").fetchall()
         scored = [(fid, t, float(np.dot(q, _from_blob(e)))) for fid, t, e in rows]
@@ -233,44 +339,164 @@ class Memory:
             self.dirty = True
 
     def forget(self, query: str, min_similarity: float) -> tuple[str | None, int]:
-        """Delete the fact that best matches `query`, plus past turns that closely
+        """Delete the fact that best matches `query` (and its near-copies, e.g. the same
+        fact said once and also learned automatically), plus past turns that closely
         match it. Returns (deleted fact text or None, number of turns deleted)."""
-        q = self.embedder.embed_query(query)
+        q = self._embed_query(query)
         with self.lock:
             fact_text = None
-            facts = self.conn.execute("SELECT id, text, emb FROM facts").fetchall()
+            facts = [(fid, t, _from_blob(e)) for fid, t, e in
+                     self.conn.execute("SELECT id, text, emb FROM facts WHERE emb IS NOT NULL")]
             if facts:
-                scores = [float(np.dot(q, _from_blob(r[2]))) for r in facts]
+                scores = [float(np.dot(q, e)) for _, _, e in facts]
                 best = int(np.argmax(scores))
                 if scores[best] >= min_similarity:
-                    fact_text = facts[best][1]
-                    self.conn.execute("DELETE FROM facts WHERE id = ?", (facts[best][0],))
-            turns = self.conn.execute("SELECT id, emb FROM turns").fetchall()
-            turn_ids = [(tid,) for tid, emb in turns
-                        if emb and float(np.dot(q, _from_blob(emb))) >= min_similarity]
+                    fact_text, best_emb = facts[best][1], facts[best][2]
+                    doomed = [(fid,) for fid, _, e in facts
+                              if float(np.dot(best_emb, e)) >= config.LEARN_DUPLICATE_SIMILARITY]
+                    self.conn.executemany("DELETE FROM facts WHERE id = ?", doomed)
+            vec = self._turn_vectors()
+            hits = vec.ids[vec.matrix @ q >= min_similarity] if len(vec.ids) else []
+            turn_ids = [(int(tid),) for tid in hits]
             self.conn.executemany("DELETE FROM turns WHERE id = ?", turn_ids)
             self.conn.commit()
             if fact_text or turn_ids:
                 self.dirty = True
+                self._vectors = None
+                self._compact_keyword_index()
             return fact_text, len(turn_ids)
 
+    def _compact_keyword_index(self) -> None:
+        """FTS5 marks deleted rows instead of erasing them; merging drops the words of
+        forgotten text from RAM right away (the index is never saved anyway)."""
+        if self.keyword_index:
+            for table in ("facts_fts", "turns_fts"):
+                self.conn.execute(f"INSERT INTO {table}({table}) VALUES ('optimize')")
+
     # --- search -----------------------------------------------------------------
+    def _embed_query(self, text: str) -> np.ndarray:
+        """One embedding per question, although several searches use it."""
+        cached = self._last_query
+        if cached and cached[0] == text:
+            return cached[1]
+        vec = self.embedder.embed_query(text)
+        self._last_query = (text, vec)
+        return vec
+
+    def _turn_vectors(self) -> _TurnVectors:
+        """Call with self.lock held."""
+        if self._vectors is None:
+            rows = self.conn.execute(
+                "SELECT id, ts, emb FROM turns WHERE emb IS NOT NULL ORDER BY id").fetchall()
+            self._vectors = _TurnVectors(
+                np.array([r[0] for r in rows], dtype=np.int64),
+                np.array([(r[1] or "")[:10] for r in rows], dtype="<U10"),
+                np.vstack([_from_blob(r[2]) for r in rows]) if rows
+                else np.zeros((0, 0), dtype=np.float32))
+        return self._vectors
+
+    def _keyword_ids(self, table: str, terms: list[str], limit: int,
+                     where: str = "", params: tuple = ()) -> list[int]:
+        """Row ids ranked by BM25 for the distinctive words among `terms`."""
+        if not self.keyword_index or not terms:
+            return []
+        total = self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+        useful = []
+        for term in terms:  # a word found in most rows can't tell rows apart
+            n = self.conn.execute(f"SELECT count(*) FROM {table} WHERE {table} MATCH ?",
+                                  (_fts(term),)).fetchone()[0]
+            if n and n <= max(20, total // 10):
+                useful.append(term)
+        if not useful:
+            return []
+        match = " OR ".join(_fts(t) for t in useful)
+        if table == "turns_fts":
+            sql = ("SELECT f.rowid FROM turns_fts f JOIN main.turns t ON t.id = f.rowid "
+                   f"WHERE turns_fts MATCH ? {where} ORDER BY f.rank LIMIT ?")
+        else:
+            sql = f"SELECT rowid FROM {table} WHERE {table} MATCH ? ORDER BY rank LIMIT ?"
+        return [r[0] for r in self.conn.execute(sql, (match, *params, limit))]
+
     def search(self, query: str, k: int, min_similarity: float,
-               exclude_recent_turns: int = 0) -> list[str]:
-        """Top-k facts and past turns most related to `query`."""
-        q = self.embedder.embed_query(query)
+               exclude_recent_turns: int = 0, hints: query_hints.Hints | None = None,
+               include_facts: bool = True) -> list[str]:
+        """Top-k past turns (and facts) related to `query`: meaning and keyword searches
+        merged by RRF, plus a small boost for recent turns.
+        exclude_recent_turns: skip the newest turns (they are the chat history already).
+        With a date hint, only turns from that time count; when the user asks about that
+        time ("what did we talk about yesterday?"), the date alone is enough."""
+        hints = hints or _plain_hints(query)
+        q = self._embed_query(query)
+        date_only = bool(hints.date_range and hints.recall)
         with self.lock:
-            facts = self.conn.execute("SELECT text, emb FROM facts").fetchall()
-            turns = self.conn.execute(
-                "SELECT ts, user_text, reply, emb FROM turns ORDER BY id DESC LIMIT -1 OFFSET ?",
-                (exclude_recent_turns,),
-            ).fetchall()
-        candidates = [(f"Fact: {t}", e) for t, e in facts]
-        candidates += [(f"On {ts[:10]} user said: {u} | you replied: {r}", e)
-                       for ts, u, r, e in turns]
-        scored = [(float(np.dot(q, _from_blob(e))), text) for text, e in candidates if e]
-        scored.sort(reverse=True)
-        return [text for score, text in scored[:k] if score >= min_similarity]
+            newest = self.conn.execute("SELECT id FROM turns ORDER BY id DESC LIMIT 1 OFFSET ?",
+                                       (exclude_recent_turns,)).fetchone()
+            max_id = newest[0] if newest else 0
+            vec = self._turn_vectors()
+            mask = vec.ids <= max_id
+            where, params = "AND t.id <= ?", (max_id,)
+            if hints.date_range:
+                start, end = (d.isoformat() for d in hints.date_range)
+                mask &= (vec.days >= start) & (vec.days < end)
+                where += " AND substr(t.ts, 1, 10) >= ? AND substr(t.ts, 1, 10) < ?"
+                params += (start, end)
+            ids, days = vec.ids[mask], vec.days[mask]
+            scores = vec.matrix[mask] @ q if len(ids) else np.zeros(0)
+            order = np.argsort(-scores, kind="stable")[:SEARCH_CANDIDATES]
+            by_meaning = [("t", int(ids[i])) for i in order
+                          if date_only or scores[i] >= min_similarity]
+            by_words = [("t", i) for i in self._keyword_ids(
+                "turns_fts", hints.terms, SEARCH_CANDIDATES, where, params)]
+            rankings = [by_meaning, by_words]
+            if include_facts:
+                facts = self.conn.execute(
+                    "SELECT id, emb FROM facts WHERE emb IS NOT NULL").fetchall()
+                fact_scores = sorted(((float(np.dot(q, _from_blob(e))), fid) for fid, e in facts),
+                                     reverse=True)
+                rankings.append([("f", fid) for score, fid in fact_scores[:SEARCH_CANDIDATES]
+                                 if score >= min_similarity])
+                rankings.append([("f", fid) for fid in
+                                 self._keyword_ids("facts_fts", hints.terms, SEARCH_CANDIDATES)])
+            fused = rrf(*rankings)
+            day_of = dict(zip(ids.tolist(), days.tolist()))
+            today = date.today()
+            for item in fused:  # a small boost for recent conversations
+                if item[0] == "t" and (day := day_of.get(item[1])):
+                    age = max(0, (today - date.fromisoformat(day)).days)
+                    fused[item] += RECENCY_BOOST * 0.5 ** (age / RECENCY_HALF_LIFE_DAYS)
+            chosen = sorted(fused, key=fused.get, reverse=True)[:k]
+            if date_only:
+                chosen.sort()  # that time's conversations in the order they happened
+            out = []
+            for kind, row_id in chosen:
+                if kind == "f":
+                    row = self.conn.execute("SELECT text FROM facts WHERE id = ?",
+                                            (row_id,)).fetchone()
+                    out.append(f"Fact: {row[0]}")
+                else:
+                    ts, user, reply = self.conn.execute(
+                        "SELECT ts, user_text, reply FROM turns WHERE id = ?", (row_id,)).fetchone()
+                    out.append(f"On {ts[:10]} user said: {_short(user)} | "
+                               f"you replied: {_short(reply)}")
+        return out
+
+    def recall(self, query: str, now: datetime,
+               exclude_recent_turns: int = 0) -> tuple[list[str], list[str]]:
+        """What the LLM gets for this question: (facts, related past conversations).
+        Facts appear once (in the facts list), never again among the related."""
+        hints = query_hints.parse(query, now)
+        facts = self.facts_for_prompt(query, config.ALL_FACTS_LIMIT,
+                                      config.ALWAYS_SHOWN_CATEGORIES, hints,
+                                      config.PREFERRED_CATEGORIES)
+        related = self.search(query, config.MEMORY_TOP_K, config.MEMORY_MIN_SIMILARITY,
+                              exclude_recent_turns, hints, include_facts=False)
+        return facts, related
+
+    def stats(self) -> dict:
+        """Row counts for the log (never content): shows when to split storage."""
+        with self.lock:
+            return {"turns": self.conn.execute("SELECT count(*) FROM turns").fetchone()[0],
+                    "facts": self.conn.execute("SELECT count(*) FROM facts").fetchone()[0]}
 
     # --- daily usage ---------------------------------------------------------
     def get_usage(self, day: str) -> float:

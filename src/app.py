@@ -13,15 +13,16 @@ from zoneinfo import ZoneInfo
 
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 import config
 import learn
 import llm
+import tools
 import websearch
 from budget import (Budget, Meter, current_meters, describe_reset, minutes_until_stop,
                     usage_summary)
-from intents import parse_command
+from intents import parse_command, parse_confirmation
 from stt import AudioUnreadable
 
 _URL = re.compile(r"(https?://|www\.)\S+")
@@ -36,6 +37,9 @@ PHRASES = {
         "notice": "Heads up: {pct}% of {label} is used.",
         "notice_left": " About {left} minutes left.",
         "error": "Sorry, something went wrong. Please try again.",
+        "done": "Done.",
+        "failed": "Sorry, that didn't work.",
+        "cancelled": "Okay, I won't do it.",
         "bye_idle": "No activity for a while, so I'm closing now. Your memory is saved. Goodbye!",
         "bye_limit": "{label} is almost used up, so I'm stopping now to keep this free. "
                      "Your memory is saved. Goodbye!",
@@ -50,6 +54,9 @@ PHRASES = {
         "notice": "ध्यान दें: {label} का {pct}% इस्तेमाल हो चुका है।",
         "notice_left": " लगभग {left} मिनट बचे हैं।",
         "error": "माफ़ कीजिए, कुछ गड़बड़ हो गई। फिर से कोशिश करें।",
+        "done": "हो गया।",
+        "failed": "माफ़ कीजिए, यह नहीं हो पाया।",
+        "cancelled": "ठीक है, नहीं करूँगा।",
         "bye_idle": "काफ़ी देर से कोई बात नहीं हुई, इसलिए मैं बंद हो रहा हूँ। आपकी मेमोरी सेव है। अलविदा!",
         "bye_limit": "{label} लगभग ख़त्म है, इसलिए इसे मुफ़्त रखने के लिए मैं अब बंद हो रहा हूँ। "
                      "आपकी मेमोरी सेव है। अलविदा!",
@@ -75,6 +82,15 @@ def limit_goodbye(meter: Meter, lang: str, now: datetime | None = None) -> str:
     label = p["labels"][meter.name]
     bye = p["bye_limit"].format(label=label[0].upper() + label[1:])
     return f"{bye} {describe_reset(meter, now or now_ist(), lang)}"
+
+
+def size_report(nbytes: int, stats: dict) -> str:
+    """e.g. '3.2 MB, 1,234 turns, 56 facts' plus a note when it is time to split the
+    storage (docs/FUTURE_PLANS.md, section 2). Sizes and counts only."""
+    text = f"{nbytes / 1e6:.1f} MB, {stats['turns']:,} turns, {stats['facts']:,} facts"
+    if nbytes > config.SPLIT_STORAGE_AT_MB * 1e6 or stats["turns"] > config.SPLIT_STORAGE_AT_TURNS:
+        text += "; memory is large: time to split storage (docs/FUTURE_PLANS.md section 2)"
+    return text
 
 
 def now_ist() -> datetime:
@@ -110,16 +126,17 @@ class Assistant:
         self.stopped = threading.Event()
 
     # --- one spoken turn -------------------------------------------------------
-    def handle_turn(self, audio: bytes, quiet: bool = False):
+    def handle_turn(self, audio: bytes, quiet: bool = False, mime: str = ""):
         """Generator of NDJSON events: transcript, then sentence text + audio pairs.
-        quiet = Whisper mode (soft voice): boost the audio and listen more sensitively."""
+        quiet = Whisper mode (soft voice): boost the audio and listen more sensitively.
+        mime = the recording format the browser says it sent (for the log only)."""
         t0 = time.time()
         first_audio = None
         try:
             try:
                 text, lang = self.stt.transcribe(audio, quiet=quiet)
             except AudioUnreadable as e:  # a bad recording from the phone: just ask again
-                print(f"[turn] recording unreadable: {e}")  # size/type only, never content
+                print(f"[turn] recording unreadable: {e}; browser said {mime[:40] or '?'}")
                 yield _line(type="done", heard=False)
                 return
             heard = time.time() - t0
@@ -132,8 +149,22 @@ class Assistant:
             now = now_ist()
 
             turn_id = None
-            command = parse_command(text)
-            if command:
+            waiting = tools.waiting()  # an action that asked "Should I ...?" last turn
+            answer = parse_confirmation(text) if waiting else None
+            if waiting and answer is None:
+                tools.cancel()  # the user moved on: that action is dropped
+            command = None if answer else parse_command(text)
+            if answer:
+                if answer == "yes":
+                    ok, _ = tools.confirm()
+                    print(f"[tool] {waiting.name} confirmed by voice: {'done' if ok else 'failed'}")
+                    reply = phrases["done"] if ok else phrases["failed"]
+                else:
+                    tools.cancel()
+                    reply = phrases["cancelled"]
+                yield from self._speak(reply, lang)
+                turn_id = self.memory.add_turn(text, reply, lang, now)
+            elif command:
                 action, content = command
                 if action == "remember":
                     self.memory.add_fact(content, now)
@@ -183,10 +214,7 @@ class Assistant:
     def _llm_sentences(self, text: str, lang: str, now: datetime, model: str,
                        screen: str | None = None):
         history = self.memory.recent_turns(config.RECENT_TURNS)
-        related = self.memory.search(text, config.MEMORY_TOP_K, config.MEMORY_MIN_SIMILARITY,
-                                     exclude_recent_turns=config.RECENT_TURNS)
-        facts = self.memory.facts_for_prompt(text, config.ALL_FACTS_LIMIT,
-                                             config.ALWAYS_SHOWN_CATEGORIES)
+        facts, related = self.memory.recall(text, now, exclude_recent_turns=config.RECENT_TURNS)
         usage = usage_summary(current_meters(self.memory, now), now, config.STOP_AT)
         messages = llm.build_messages(text, lang, facts, related, history, now, screen, usage)
         chunker = llm.SentenceChunker()
@@ -282,8 +310,11 @@ class Assistant:
     def save(self) -> bool:
         with self.save_lock:
             self.memory.dirty = False
+            size = 0
             try:
-                ok = self.store.save(self.memory.to_bytes())
+                data = self.memory.to_bytes()
+                size = len(data)
+                ok = self.store.save(data)
             except Exception as e:
                 print(f"[memory] save error: {type(e).__name__}: {str(e)[:200]}")
                 ok = False
@@ -291,7 +322,7 @@ class Assistant:
                 self.memory.dirty = True
             self.save_ok = ok
             print(f"[memory] {'saved' if ok else 'SAVE FAILED (encrypted backup kept in output)'} "
-                  f"at {now_ist():%H:%M}")
+                  f"at {now_ist():%H:%M} ({size_report(size, self.memory.stats())})")
             return ok
 
     def close(self, reason: str, meter: Meter | None = None) -> None:
@@ -352,7 +383,8 @@ class Assistant:
                 self._check_ollama()
             # While you're quiet: learn facts from old conversations (one per tick), then
             # look for patterns across recent messages (every few minutes at most).
-            if (not self.turn_lock.locked() and self.state != "closing"
+            learning = self.learn_thread is not None and self.learn_thread.is_alive()
+            if (not self.turn_lock.locked() and not learning and self.state != "closing"
                     and self.timer.idle_seconds(now) >= config.BACKLEARN_AFTER_IDLE_SEC):
                 if not self.backlearn_one() and \
                         time.time() - self.last_reflect >= config.REFLECT_EVERY_MIN * 60:
@@ -436,6 +468,7 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
         assistant.count_net(1, int(response.headers.get("content-length", 0)))
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
@@ -485,10 +518,11 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
         events: queue.Queue = queue.Queue()
 
         quiet = request.headers.get("x-quiet") == "1"  # Whisper mode on the page
+        mime = request.headers.get("content-type", "")
 
         def worker():
             try:
-                for event in assistant.handle_turn(audio, quiet):
+                for event in assistant.handle_turn(audio, quiet, mime):
                     events.put(event)
             finally:
                 events.put(None)

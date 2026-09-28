@@ -77,9 +77,12 @@ RECENT_TURNS = 6              # last N turns of this session sent as chat histor
 FORGET_MIN_SIMILARITY = 0.85
 # Learning facts from normal conversation (learn.py)
 LEARN_FROM_CHAT = True
-# In every prompt: allergies/diet, your corrections of the assistant ("assistant"), your
-# preferences and the patterns it noticed (what you focus on, how you like help).
-ALWAYS_SHOWN_CATEGORIES = ("health", "diet", "assistant", "preference", "pattern")
+# In every prompt, however many there are: allergies/diet and your corrections of the
+# assistant ("assistant") - safety first - plus everything you asked it to remember.
+ALWAYS_SHOWN_CATEGORIES = ("health", "diet", "assistant")
+# Shown next, within ALL_FACTS_LIMIT: your preferences and the patterns it noticed (what
+# you focus on, how you like help). Capped, so hundreds of them can't bloat every prompt.
+PREFERRED_CATEGORIES = ("preference", "pattern")
 LEARN_KNOWN_FACTS = 5                # similar known facts shown, so changes replace them
 LEARN_DUPLICATE_SIMILARITY = 0.93    # at or above this, a new fact counts as known
 BACKLEARN_AFTER_IDLE_SEC = 15        # read old conversations for facts while you're quiet
@@ -89,6 +92,10 @@ REFLECT_MIN_MESSAGES = 6
 REFLECT_MAX_MESSAGES = 40
 REFLECT_EVERY_MIN = 5
 DELETE_OLD_DATASET_VERSIONS = True  # so "forget" also removes old copies
+# The whole memory is uploaded at every save. Past these sizes, split it into a small
+# "hot" file plus monthly archives (docs/FUTURE_PLANS.md, section 2); the log says when.
+SPLIT_STORAGE_AT_MB = 50
+SPLIT_STORAGE_AT_TURNS = 20_000
 
 # --- Session ---------------------------------------------------------------------
 IDLE_TIMEOUT_MIN = 10

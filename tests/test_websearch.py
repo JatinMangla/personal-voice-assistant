@@ -99,3 +99,33 @@ def test_llm_searches_then_answers(monkeypatch):
     assert calls[1]["messages"][-1] == {"role": "tool", "tool_name": "web_search",
                                         "content": "Web results: Kesariya is sung by Arijit Singh."}
     assert calls[0]["tools"][0]["function"]["name"] == "web_search"
+
+
+def test_last_round_has_no_tools_so_the_model_must_answer(monkeypatch):
+    tools.register(tools.Tool("web_search", "search", {}, lambda query: "nothing",
+                              requires_confirmation=False))
+    calls = []
+    search_again = [{"message": {"tool_calls": [{"function": {"name": "web_search",
+                                                              "arguments": {"query": "x"}}}]}},
+                    {"done": True}]
+
+    def fake_post(url, json=None, **kwargs):
+        calls.append(json)
+        if "tools" in json:
+            return FakeResponse(search_again)
+        return FakeResponse([{"message": {"content": "I couldn't find it."}}, {"done": True}])
+
+    monkeypatch.setattr(llm.requests, "post", fake_post)
+    text = "".join(llm.stream_reply([{"role": "user", "content": "Find x"}], "m"))
+    assert text == "I couldn't find it."
+    assert len(calls) == llm.MAX_TOOL_ROUNDS + 1 and "tools" not in calls[-1]
+
+
+def test_speed_report_shows_model_load_time(monkeypatch):
+    final = {"done": True, "eval_count": 40, "eval_duration": 2_000_000_000,
+             "prompt_eval_count": 300, "prompt_eval_duration": 500_000_000,
+             "load_duration": 41_000_000_000}
+    monkeypatch.setattr(llm.requests, "post", lambda *a, **k: FakeResponse(
+        [{"message": {"content": "OK."}}, final]))
+    "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], "m"))
+    assert llm.speed_report().endswith("model load 41.0s")
