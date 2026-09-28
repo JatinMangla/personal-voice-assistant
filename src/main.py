@@ -211,6 +211,9 @@ def _run(ctx: dict) -> None:
     timer.touch(now_ist())
     ctx["ready"] = True  # from here on the watchdog and close() record usage
     threading.Thread(target=assistant.watchdog, daemon=True).start()
+    if config.HOME:
+        import local_voice  # "Hey Jarvis" on this PC's mic and speakers
+        local_voice.start(assistant)
     if ngrok_token:
         url = "https://" + ngrok_domain.removeprefix("https://").strip("/")
         login = "Google sign-in" if allowed_emails else "password page"

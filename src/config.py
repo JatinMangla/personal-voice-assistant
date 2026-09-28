@@ -156,6 +156,11 @@ STARTUP_TIMEOUT_MIN = 20
 
 # --- Home PC (HOSTING = "home") ---------------------------------------------------------
 HOME_DIR = Path(os.environ.get("PVA_HOME_DIR") or Path.home() / ".jarvis")
+# "Hey Jarvis" on the home PC's own microphone and speakers (local_voice.py)
+WAKE_WORD = True
+WAKE_WORD_MODEL = "hey_jarvis"
+WAKE_THRESHOLD = 0.5     # openWakeWord's recommended value; higher = fewer false wakes
+WAKE_PAUSE_MS = 1200     # a pause this long ends the question
 HOME_CPU_LLM = "qwen3:4b"  # used when the PC has no NVIDIA GPU (and PVA_LLM_MODEL is unset)
 NGROK_IN_USE = True        # main.py sets False at home without a tunnel (local use only)
 ABOUT_ASSISTANT_HOME = (
