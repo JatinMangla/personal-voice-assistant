@@ -86,6 +86,14 @@ Search speed is not the problem for years. **Retrieval quality** (keywords + mea
 **upload size** (split storage) are the real issues, and they are what the plan fixes.
 
 ## 5. Status
-- The analysis is done. Step 1 (FTS5 + RRF + date/category filters) is small, and can be built
-  and tested locally.
-- Step 4 is deliberately deferred until the data is large enough to need it.
+- **Built (2026-09-28, night 2):** steps 1–3 (`memory.py`, `query_hints.py`) and the
+  summaries tree from step 4 (`digest.py`). Details that differ from the sketch above:
+  - The FTS5 index lives in **TEMP** tables: rebuilt at every load (0.08 s for 15k turns) and
+    never serialized, so it adds nothing to the upload and can't keep forgotten words in it.
+  - Tokenizer `unicode61 remove_diacritics 2 categories 'L* N* Co M*'`: without `M*`, Hindi
+    vowel signs count as separators and "एलर्जी" is cut into pieces.
+  - Long Latin words become prefix terms ("allergic" → `allerg*` also finds "allergy");
+    words that occur in more than 10 % of rows are ignored as too common.
+  - Measured: ~20 ms per recall over 15,000 synthetic turns (plus the e5 query embedding).
+- **Still deferred:** split storage and float16 (step 4), until the save log reports 50 MB or
+  20,000 turns.

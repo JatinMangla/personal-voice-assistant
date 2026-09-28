@@ -182,7 +182,11 @@ The page shows minutes used today and when memory was last saved.
 | **Clear** (top right) | Clears the chat on the screen only. Jarvis's memory is kept. |
 | **🤫 Whisper** (left of the mic) | For speaking softly, e.g. at night: Jarvis listens more sensitively and boosts your voice. It stays on until you tap it again. |
 | Just talk | Memory is automatic. Jarvis decides what's worth keeping: your details, preferences, settings, decisions, what you did and plan, and patterns like what you focus on. Say "forget that …" to remove something. |
-| Just mention things about yourself: "I'm allergic to peanuts", "my daughter Riya is 8" | Jarvis **learns lasting facts by itself**, with no "remember that" needed. A note "🧠 Learned: …" shows what it picked up. Health and diet facts are always in front of it, so months later a recipe with peanuts comes with a warning and a substitute. |
+| Just mention things about yourself: "I'm allergic to peanuts", "my daughter Riya is 8" | Jarvis **learns lasting facts by itself**, quietly, with no "remember that" needed. Ask "what do you know about me?" to hear them. Health and diet facts are always in front of it, so months later a recipe with peanuts comes with a warning and a substitute. |
+| "What did we talk about yesterday?" / "What did I decide last month?" / "पिछले हफ्ते मैंने क्या कहा?" | Jarvis understands dates (today, yesterday, last week, last month, "in March", "3 days ago", also in Hindi/Hinglish) and topics ("my decisions", "health", "goals"), and looks only there. For longer periods it uses short **day/week/month summaries** it writes by itself while you're quiet. Names and numbers ("Rohan", "invoice 48213") are found word for word. |
+| "Remind me to call mom at 6" / "Add milk to my to-do list" | Saved as a reminder or to-do. Jarvis can't ring while it's switched off, so **due reminders are said after your first question** and shown as ⏰ notes when you open it. Optional: a free phone notification at the due time (see "Reminder notifications"). |
+| "I have to pay the electricity bill of 1,200 rupees on the 5th every month" / "I paid the electricity bill" / "How much did I pay for bills?" | Bills are monthly reminders with an amount. Paying one logs it and moves it to next month; Jarvis can total the last 3 months. |
+| "Turn off the living room light" / "Is the washing machine done?" / "Who's at the door?" | Only after you connect Home Assistant (see "Home devices"). Risky actions ask "Should I …?" first and happen only after you say **yes**. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
 | Tap 👍 / 👎 under a reply | Rates it (tap again to undo). 👍 replies are what the assistant later learns your style from (Phase 5). |
 
@@ -196,8 +200,11 @@ The page shows minutes used today and when memory was last saved.
 | Your memory dataset leaks or is made public by mistake | **Yes.** It is only ciphertext; old versions are deleted on every save. |
 | Someone reads the notebook logs | **Yes.** Conversations are never printed. |
 | Internet search leaking personal data | **Yes.** Only the short search words the assistant picks are sent to the search engine; never your memory. Web results are treated as untrusted text and can't trigger any action. Set `WEB_SEARCH = False` in `src/config.py` to turn internet off. |
-| Learning something it shouldn't | **Mostly.** It learns only from *your* words, never web text; anything that looks private (numbers, PINs, OTPs, passwords, emails) is never learned; you see every learned fact on screen, and "forget that …" removes it. Set `LEARN_FROM_CHAT = False` in `src/config.py` to switch learning off. |
-| "Forget" leaving traces | **Mostly.** Deleted rows are zeroed in the database and old dataset versions are deleted. |
+| Learning something it shouldn't | **Mostly.** It learns only from *your* words, never web text; anything that looks private (numbers, PINs, OTPs, passwords, emails) is never learned; "what do you know about me?" lists what it knows, and "forget that …" removes it. Set `LEARN_FROM_CHAT = False` in `src/config.py` to switch learning off. |
+| "Forget" leaving traces | **Mostly.** Deleted rows are zeroed in the database, copies of the same fact and the summaries of those days are deleted too, the search index is never saved, and old dataset versions are deleted. |
+| A web page tricking Jarvis into switching something on | **Yes.** Device actions run only after *your* spoken "yes" on the very next question, checked by fixed rules, not by the AI. Only devices and actions you listed exist. |
+| The Start button reading your memory | **No, it can't.** It reads only a separate small encrypted file with usage numbers (GPU minutes, link counts), never conversations or facts. |
+| Reminder notifications | **Private by default.** The phone notification only says "You have a reminder"; the reminder text stays in your memory. |
 | Your Google/Kaggle/GitHub account is hacked | **No.** The key sits in Kaggle Secrets, and the Kaggle token (also in GitHub if you use the Start button) can run notebooks that use it. That's why 2-step verification on all three is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |
 
@@ -221,6 +228,9 @@ To change the model, edit `LLM_MODEL` in `src/config.py` **and** `LLM` in the mo
 | `NOTIFY_AT` / `STOP_AT` | 0.90 / 0.99 |
 | `LLM_MODEL` | `qwen3.5:9b` (falls back to `qwen3:8b`) |
 | `WHISPER_MODEL` | `large-v3-turbo` |
+| `NTFY_INCLUDE_TEXT` | `False` (reminder notifications say only "You have a reminder") |
+| `OLLAMA_FLASH_ATTENTION` | `False` (an experiment: try `True` and compare the `[turn]` speed lines) |
+| `WAKE_WORD` | `True` (home PC only: "Hey Jarvis" on the PC's microphone) |
 
 ## Fallback: password page instead of Google sign-in
 If ngrok's Google sign-in ever stops working on the free plan, delete the `ALLOWED_EMAIL` secret and add `APP_PASSWORD` (use a long one and let your browser save it). The page then asks for the password once per device for 30 days, and locks for 15 minutes after 5 wrong tries.
@@ -261,6 +271,74 @@ The trained model is stored **encrypted** with your `MEMORY_KEY`, like the memor
 
 To stop using it, remove that input from the assistant notebook, or set `TUNED_MODE = "base"` in `src/config.py`.
 
+## Reminder notifications on your phone (optional, free)
+
+Jarvis runs only when you start it, so it can't ring by itself. With this, the free service
+ntfy.sh sends a notification at the due time (up to 3 days ahead; later reminders are
+scheduled the next time you start Jarvis). The notification only says "You have a reminder".
+
+1. Think of a long random topic name, e.g. `jarvis-7f3k9q2m8x4w` (anyone who knows the name
+   could read the notifications, so make it unguessable).
+2. On your phone: open **ntfy.sh/app** in Chrome → **Subscribe to topic** → type the name →
+   allow notifications. (Or install the ntfy app, if you prefer.)
+3. Add the secret `NTFY_TOPIC` = that name: in Kaggle (Add-ons → Secrets) **and** on GitHub
+   (repo → Settings → Secrets and variables → Actions → New repository secret).
+
+## Home devices and cameras (Home Assistant, optional)
+
+Jarvis talks to your devices through **Home Assistant** (free, runs at home, e.g. on a
+Raspberry Pi or the home PC). Home Assistant connects to SmartThings (Samsung washer/fridge),
+Home Connect (Bosch dishwasher), Android TV (Mi TV), Tuya/LocalTuya (Syska bulb) and smart
+plugs (the air fryer).
+
+1. In Home Assistant: your profile (bottom left) → **Security** → **Long-lived access tokens**
+   → Create → copy it.
+2. Write the list of what Jarvis may control (only these exist for it):
+   ```json
+   {"devices": [
+      {"name": "living room light", "entity": "light.syska_bulb", "actions": ["turn_on", "turn_off"], "confirm": false},
+      {"name": "air fryer", "entity": "switch.air_fryer_plug", "actions": ["turn_on", "turn_off"]},
+      {"name": "tv", "entity": "media_player.mi_tv", "actions": ["turn_on", "turn_off", "volume_up", "volume_down"]},
+      {"name": "washing machine", "entity": "sensor.washer_job_state", "actions": []}],
+    "cameras": [{"name": "front door", "entity": "camera.front_door"}]}
+   ```
+   Entity names are in Home Assistant → Settings → Devices & services → Entities.
+   `"confirm": false` means no "yes" needed: only use it for harmless things like a light.
+3. Secrets (Kaggle and GitHub, as above): `HA_URL` (e.g. `https://yourhome.duckdns.org`, or
+   on the home PC `http://homeassistant.local:8123`), `HA_TOKEN`, and `HOME_DEVICES` (the list
+   above, pasted as one line). On the home PC you can put the list in `devices.json` instead.
+
+From Kaggle, Home Assistant must be reachable over https from the internet; that's easiest
+once Jarvis runs on the home PC (then the plain home-network address works).
+
+## Run on your own PC (home mode)
+
+The same code runs at home: no cloud, no GPU-hour limits, always on, and "Hey Jarvis" on the
+PC's own microphone. With an NVIDIA GPU it uses the same models as Kaggle; without one it
+uses smaller ones (slower, still private and free).
+
+1. Install **Python 3.12** (python.org, tick "Add to PATH") and **Ollama** (ollama.com).
+   For Hindi speech also install **espeak-ng** (github.com/espeak-ng/espeak-ng/releases).
+2. With an NVIDIA GPU: install PyTorch with CUDA first (pytorch.org → "Get started").
+3. In this folder:
+   ```
+   python -m venv .venv-home
+   .venv-home\Scripts\python -m pip install -r requirements-home.txt
+   ```
+4. Create the folder `C:\Users\<you>\.jarvis` and in it a file `secrets.env`:
+   ```
+   MEMORY_KEY=<the same key as on Kaggle>
+   NGROK_AUTHTOKEN=<optional: for your phone>
+   NGROK_DOMAIN=<optional>
+   ALLOWED_EMAIL=<your Gmail>
+   ```
+5. To bring your memory home: Kaggle → Datasets → `assistant-memory` → Download → put
+   `memory.db.enc` into that `.jarvis` folder (it stays encrypted; same `MEMORY_KEY`).
+6. Start: `.venv-home\Scripts\python scripts\run_home.py`. The first start downloads the
+   models (a few GB). Without ngrok, open `http://127.0.0.1:8000` on the PC itself.
+   Say **"Hey Jarvis"** near the PC to talk hands-free.
+
+Don't run Jarvis on Kaggle and at home at the same time: each has its own copy of the memory.
+
 ## Later
-- **Own PC:** the same code on a home PC removes the cloud and tunnel limits. This is the real privacy goal.
-- **Home devices:** add them in `src/tools.py`. Risky actions always need a spoken "yes" first.
+- **Cameras that recognise faces** and more utilities, as tools with the same rules.

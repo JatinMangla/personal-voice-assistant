@@ -300,7 +300,58 @@ while. The owner ran the tests and pushed themselves (163 passed, 1 skipped).
   - PageIndex was rejected as the main method (it suits long structured documents), but its
     tree idea is borrowed for time summaries.
 
+## 2026-09-28 (night 2): FUTURE_PLANS worked through
+
+The owner asked to analyse the whole project against FUTURE_PLANS.md, fix weak points,
+then build every plan item. Step 0 (checks on a real device) needs the owner; it was done
+as a code audit instead, and the device checks moved to the next run.
+
+**Audit findings, fixed:**
+- Risky tools could never run: `requires_confirmation` refused, but nothing ran the action
+  after a "yes". Now the call is parked (`tools.pending`), the model asks "Should I …?", and
+  only the user's next words, if a plain yes (fixed rules in `intents.parse_confirmation`,
+  English/Hindi/Hinglish, 2-minute window), run it. The model or a web page can't confirm.
+- The tool loop could end without an answer after 3 tool rounds; the last round now has no
+  tools.
+- `preference`/`pattern` facts were always in the prompt with no cap: hundreds of them
+  would slow every reply and could overflow the 8k context. Now only health/diet/assistant
+  and "remember" facts are uncapped; preferences/patterns come next within the 50-fact limit.
+- "Forget" deleted only the single best fact, so an auto-learned copy survived; near-copies
+  (similarity ≥ 0.93 to it) go too.
+- Facts were listed twice in the prompt (facts section + related); now once.
+- Back-learning could overlap the post-turn learning call.
+- No size in the save log (needed for the scaling trigger); no model load time in the speed
+  report (needed to explain the 47 s first answer); the page let the browser choose the
+  recording format; no `nosniff` header. All added.
+
+**Built (plan step 1, hybrid memory):** FTS5 keyword index with a Devanagari-safe tokenizer
+(`categories 'L* N* Co M*'`, else vowel signs split Hindi words) in TEMP tables: rebuilt at
+load (0.08 s for 15k turns), never saved, so no trace of forgotten text in the upload.
+BM25 + vector rankings merged by RRF (k = 60) with a small recency boost; date ranges,
+categories and "recall" intent from cheap rules (`query_hints.py`); words found in >10 % of
+rows are ignored. Measured on 15k synthetic turns: ~20 ms per recall.
+
+**Built (backlog):**
+- Start button checks the limits before pushing: every save also uploads `usage.json.enc`
+  (numbers only, encrypted); the script downloads just that file (`-f`), never the memory.
+- Reminders, to-dos and bills (payment log, 3-month totals) as tools; due ones are spoken
+  after the first reply and shown as notes; optional ntfy.sh scheduled push (generic text).
+- Flash attention: research showed Ollama enables it itself only on Ampere+, and it can be
+  slower on older GPUs, so it is a switch, off by default, to be A/B-tested with the new
+  load-time numbers.
+- Rebuilding the model cache with `ddgs`: the notebook already lists it; the owner re-runs it.
+
+**Built (roadmap):** A home-PC mode (`PVA_HOSTING=home`), B "Hey Jarvis" (openWakeWord,
+verified against the real package), C Home Assistant devices from an allowlist with spoken
+confirmation, D camera snapshots to the vision model, E bills (in reminders). Plan section 2:
+day/week/month digests (additive, for period questions); split storage and float16 were left
+for their trigger on purpose (riskiest change to memory, not needed yet).
+
+**Status:** 296 tests pass (1 skipped), page JS passes `node --check`. Nothing of this has
+run on Kaggle or a device yet.
+
 ## Open items / next steps
+- Next run: the checks in FUTURE_PLANS.md section 0 (old list + the new features).
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.
 - On a real phone, confirm: loudspeaker/Bluetooth playback, PWA install and offline Start button,
   YouTube app deep link, price cards.

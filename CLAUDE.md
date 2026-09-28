@@ -51,10 +51,17 @@ phone/laptop browser (src/static/index.html, PWA + service worker sw.js)
       |
 ngrok (fixed domain, Google OAuth allowlist)  ->  FastAPI on Kaggle (src/app.py)
   stt.py      faster-whisper large-v3-turbo (GPU1), en/hi only (Urdu -> Hindi)
-  intents.py  "remember that ..." / "forget that ..." (English/Hindi/Hinglish)
-  memory.py   facts (health/diet/user/assistant-corrections always in prompt) + related turns
-  llm.py      Ollama qwen3.5:9b (GPU0), think=false, streamed, tools:
-              web_search / find_video / find_prices (websearch.py, pages.py)
+  intents.py  "remember that ..." / "forget that ..." (English/Hindi/Hinglish); yes/no for
+              actions waiting for a spoken confirmation (tools.pending, 2-min window)
+  memory.py   recall(): facts (health/diet/assistant + "remember" always; preference/pattern
+              next, capped at 50) + related turns by HYBRID search: FTS5 keywords (TEMP
+              tables, rebuilt at load, never saved) + e5 vectors (cached matrix), merged by
+              RRF + recency boost; query_hints.py = date ranges/categories/recall intent;
+              period questions get digest.py day/week/month summaries first
+  llm.py      Ollama qwen3.5:9b (GPU0), think=false, streamed, tools (last round has none):
+              web_search / find_video / find_prices (websearch.py, pages.py),
+              add/list/complete/delete_reminder (reminders.py),
+              device_status / control_device / look_at_camera (home.py, only with HA_URL)
   tts.py      Kokoro (en af_heart, hi hf_alpha) -> MP3 per sentence
   learn.py    after the reply: extract lasting facts from the USER's words (JSON schema call);
               watchdog "back-learns" old turns (turns.learned = 0) while the user is idle
@@ -63,10 +70,19 @@ ngrok (fixed domain, Google OAuth allowlist)  ->  FastAPI on Kaggle (src/app.py)
   UI          fixed header top, chat scrolls, fixed bottom bar [🤫 Whisper] (mic) [▶ Start];
               🖥 screen snapshot (desktop only), Clear (UI only), 👍/👎. The owner asked for
               NO memory button: memory is automatic (/api/facts endpoints still exist, unused)
-  events: transcript, sentence(+audio), links(cards), learned, done(turn_id for 👍/👎)
+  events: transcript, sentence(+audio), links(cards), done(turn_id for 👍/👎); after the
+  reply: free-limit notices, then due reminders ("Reminder: ..."), once per session
 ```
 Background: `Assistant.watchdog` ticks every 5 s: usage clock, budget, idle close, autosave
-(10 min), Ollama health. Closing = goodbye audio, save, exit, which ends the Kaggle run (frees GPU).
+(10 min), Ollama health; while idle (and no learn call running): back-learn one old turn, else
+write one digest, else reflect (every 5 min). Closing = goodbye audio, save, exit, which ends
+the Kaggle run (frees GPU). Saves also upload `usage.json.enc` (numbers only) for the Start
+button's limit check.
+
+**Home PC (`PVA_HOSTING=home`, `scripts/run_home.py`):** `setup_home.py` instead of
+`setup_env.py`, `LocalMemoryStore` (encrypted file in `~/.jarvis`), no GPU meters, no idle
+close, ngrok optional (without it: 127.0.0.1 only), CPU fallback (qwen3:4b, Whisper small
+int8), and `local_voice.py`: "Hey Jarvis" (openWakeWord) on the PC's mic and speakers.
 
 ## Files
 | Path | What |
@@ -76,15 +92,19 @@ Background: `Assistant.watchdog` ticks every 5 s: usage clock, budget, idle clos
 | `src/config.py` | All settings + `get_secret()` (env, then the Start button's encrypted bundle, then Kaggle Secrets). `ABOUT_ASSISTANT` = true facts about itself. |
 | `src/app.py` | Assistant (turn flow, status, save, close, watchdog) + FastAPI routes. |
 | `src/budget.py`, `src/timer.py` | Free-limit meters and the session clock. |
-| `src/memory.py`, `src/crypto.py`, `src/persistence.py` | Encrypted memory and Kaggle dataset storage. |
-| `src/learn.py`, `src/intents.py` | Automatic fact learning; remember/forget commands. |
+| `src/memory.py`, `src/crypto.py`, `src/persistence.py` | Encrypted memory, hybrid search; Kaggle dataset storage (`MemoryStore`) and home file storage (`LocalMemoryStore`). |
+| `src/query_hints.py`, `src/digest.py` | Date/category/keyword rules for recall; day/week/month summaries. |
+| `src/learn.py`, `src/intents.py` | Automatic fact learning; remember/forget commands; spoken yes/no. |
+| `src/reminders.py` | Reminders, to-dos, bills + payment log, optional ntfy push. |
+| `src/home.py` | Home Assistant devices/cameras from an allowlist (`HOME_DEVICES`). |
+| `src/setup_home.py`, `src/local_voice.py` | Home-PC start-up; wake word loop. |
 | `src/websearch.py`, `src/pages.py` | Search tools, link cards, previews, prices (ddgs, no API keys). |
-| `src/llm.py`, `src/tools.py` | Prompt, streaming, tool loop, model A/B picker; tool registry (future home devices need `requires_confirmation`). |
+| `src/llm.py`, `src/tools.py` | Prompt, streaming, tool loop, model A/B picker; tool registry: `requires_confirmation`/`confirm_if` park the call as `tools.pending` until a rule-checked spoken yes; `attach_image` for camera snapshots. |
 | `src/stt.py`, `src/tts.py`, `src/tunnel.py` | Speech in/out; ngrok with OAuth traffic policy. |
 | `src/finetune_data.py` | Phase 5 training data (👍 turns only, private-looking text excluded). |
 | `src/static/` | `index.html` (whole UI), `login.html`, `sw.js`, `manifest.json`, icons. |
 | `notebooks/` | `assistant.ipynb` (Jarvis), `build_model_cache.ipynb`, `finetune.ipynb` (generated by `scripts/make_finetune_notebook.py`). |
-| `scripts/` | `start_jarvis.py` (Start button), `upload_code.py` (auto-upload), `make_code_zip.py`, `make_key.py`, `make_icons.py`. |
+| `scripts/` | `start_jarvis.py` (Start button; refuses before pushing if `usage.json.enc` says a limit is used up), `run_home.py` (home PC), `upload_code.py` (auto-upload), `make_code_zip.py`, `make_key.py`, `make_icons.py`. |
 | `.github/workflows/` | `start-jarvis.yml` (manual button), `update-kaggle-code.yml` (on push to `src/`). |
 
 ## How it is deployed
@@ -95,7 +115,7 @@ Background: `Assistant.watchdog` ticks every 5 s: usage clock, budget, idle clos
   `jarvis-secrets`, notebook output `build-model-cache`). Or: Kaggle editor -> Save & Run All.
 - **Secrets:** Kaggle Secrets (editor runs) *and* GitHub repo secrets (button runs):
   `KAGGLE_USERNAME, KAGGLE_API_TOKEN, MEMORY_KEY, NGROK_AUTHTOKEN, NGROK_DOMAIN, ALLOWED_EMAIL,
-  START_URL` (optional `APP_PASSWORD`). Button runs get them via a one-time-key encrypted
+  START_URL` (optional `APP_PASSWORD`, `NTFY_TOPIC`, `HA_URL`, `HA_TOKEN`, `HOME_DEVICES`). Button runs get them via a one-time-key encrypted
   private dataset `jarvis-secrets` + `RUN_KEY` injected into the pushed notebook.
 - ngrok domain: `volley-gnarly-constable.ngrok-free.dev`. GitHub repo: `JatinMangla/personal-voice-assistant` (private).
 
@@ -103,7 +123,7 @@ Background: `Assistant.watchdog` ticks every 5 s: usage clock, budget, idle clos
 ```
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements-dev.txt   (+ ddgs for search tests)
-.venv\Scripts\python -m pytest tests          # ~137 tests, no GPU/network needed
+.venv\Scripts\python -m pytest tests          # ~296 tests, no GPU/network needed
 node --check src/static/sw.js                  # and the <script> of index.html
 ```
 - Nothing GPU-related can run locally; the owner runs Kaggle and pastes logs. Make logs
@@ -172,6 +192,17 @@ node --check src/static/sw.js                  # and the <script> of index.html
 19. Memory safety: if a start treated an existing memory as "first run" and then `datasets
     create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
     memory must never replace the real one).
+
+## Status (2026-09-28, night 2): FUTURE_PLANS worked through
+- Built and unit-tested (296 tests), **not yet run on Kaggle or a device**: hybrid memory
+  search, spoken-yes confirmation, reminders/bills (+ ntfy), Start-button limit check,
+  digests, home-PC mode, wake word, Home Assistant devices/cameras. Audit fixes: tool loop
+  always answers, preference facts capped, forget removes copies, no overlapping learn calls.
+- Deliberately NOT built: split storage and float16 vectors (trigger: the save log line
+  `[memory] saved ... (x MB, n turns ...)` says "time to split storage" at 50 MB / 20k turns).
+- Flash attention is a switch (`OLLAMA_FLASH_ATTENTION`, off): on a T4 it may be slower;
+  compare the `[turn]` lines. The speed report now shows `model load Xs` to explain the 47 s.
+- Next: see docs/FUTURE_PLANS.md, "What to check on the next run".
 
 ## Status (2026-09-28, later)
 - Owner reported: (a) "Share screen" missing on the phone PWA: expected, phone browsers have
