@@ -1,0 +1,21 @@
+# Running Jarvis on your own PC (roadmap stage A): see README, "Run on your own PC".
+#   1. Install Python 3.11+ and Ollama (https://ollama.com). ngrok is optional (for your phone).
+#   2. With an NVIDIA GPU, first install PyTorch with CUDA from https://pytorch.org
+#      (without a GPU, the normal "pip install torch" below is fine).
+#   3. python -m venv .venv-home
+#      .venv-home\Scripts\python -m pip install -r requirements-home.txt   (Windows)
+#   4. .venv-home\Scripts\python scripts\run_home.py
+# Hindi speech also needs espeak-ng (https://github.com/espeak-ng/espeak-ng/releases).
+faster-whisper==1.2.1
+kokoro==0.9.4
+soundfile
+fastapi
+uvicorn
+cryptography
+sentence-transformers
+ddgs
+requests
+numpy
+torch
+tzdata
+huggingface_hub

@@ -5,10 +5,11 @@ import config
 
 
 class SpeechToText:
-    def __init__(self, model_path: str, device_index: int):
+    def __init__(self, model_path: str, device_index: int, device: str = "cuda"):
         from faster_whisper import WhisperModel
-        self.model = WhisperModel(model_path, device="cuda", device_index=device_index,
-                                  compute_type="float16")
+        # int8 on a CPU (home PC without an NVIDIA GPU): several times faster there.
+        self.model = WhisperModel(model_path, device=device, device_index=device_index,
+                                  compute_type="float16" if device == "cuda" else "int8")
 
     def _pick_language(self, audio) -> str:
         """Detect the language, but only choose between the allowed ones.

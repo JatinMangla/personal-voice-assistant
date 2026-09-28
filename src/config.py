@@ -2,6 +2,12 @@
 import os
 from pathlib import Path
 
+# --- Where Jarvis runs ---------------------------------------------------------------
+# "kaggle": the free cloud GPU (default). "home": your own PC (roadmap stage A), started
+# with scripts/run_home.py: memory in an encrypted file, no GPU limits, always on.
+HOSTING = os.environ.get("PVA_HOSTING", "kaggle").strip().lower()
+HOME = HOSTING == "home"
+
 # --- Assistant personality ---------------------------------------------------
 ASSISTANT_NAME = "Jarvis"
 # True facts about how the assistant works, so it never guesses about itself.
@@ -42,6 +48,8 @@ TUNED_MODE = "auto"            # "auto" = blind A/B test then keep the winner; "
 AB_MIN_RATINGS = 30            # ratings per model before "auto" picks the winner
 
 WHISPER_MODEL = "large-v3-turbo"  # "small" or "medium" if you need more speed
+WHISPER_REPO = "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+WHISPER_REPO_CPU = "Systran/faster-whisper-small"  # home PC without an NVIDIA GPU
 WHISPER_LANGUAGES = ("en", "hi")  # only these are allowed; Urdu is mapped to Hindi
 
 EMBED_MODEL = "intfloat/multilingual-e5-small"
@@ -144,6 +152,28 @@ MODELS_MARKER = "PVA_MODELS_CACHE.json"
 DOWNLOAD_FIRST = True
 # If Jarvis isn't ready this long after the run starts, it stops itself (saves GPU hours).
 STARTUP_TIMEOUT_MIN = 20
+
+
+# --- Home PC (HOSTING = "home") ---------------------------------------------------------
+HOME_DIR = Path(os.environ.get("PVA_HOME_DIR") or Path.home() / ".jarvis")
+HOME_CPU_LLM = "qwen3:4b"  # used when the PC has no NVIDIA GPU (and PVA_LLM_MODEL is unset)
+NGROK_IN_USE = True        # main.py sets False at home without a tunnel (local use only)
+ABOUT_ASSISTANT_HOME = (
+    "How you work (true facts; never claim otherwise): You run on the user's own computer at "
+    "home, not in the cloud. The user's phone reaches you through a private, secured link, or "
+    "they use you on that computer itself. You are on while that computer runs Jarvis. You DO "
+    "remember the user across sessions: facts they told you (listed below, when you know any) "
+    "and related earlier conversations, kept in encrypted memory on that computer. You can "
+    "search the internet only when a search tool is available. You can keep reminders, to-dos "
+    "and bills with your reminder tools. You cannot make calls, send messages, or control "
+    "devices unless a tool for it is available."
+)
+if HOME:
+    WORK_DIR = HOME_DIR / "work"
+    BACKUP_PATH = HOME_DIR / "memory.db.enc.prev"
+    IDLE_TIMEOUT_MIN = 0       # always on: no GPU hours to save
+    SESSION_OVERHEAD_MIN = 0
+    ABOUT_ASSISTANT = ABOUT_ASSISTANT_HOME
 
 
 def kaggle_credentials() -> tuple[str, dict[str, str]]:

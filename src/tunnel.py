@@ -5,6 +5,7 @@ stopped at ngrok's servers and never reaches this notebook.
 """
 import json
 import os
+import shutil
 import subprocess
 import time
 import urllib.request
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import config
 
-NGROK_BIN = "/usr/local/bin/ngrok"
+NGROK_BIN = "/usr/local/bin/ngrok"  # Kaggle; at home, the ngrok found on PATH
 
 
 def traffic_policy(allowed_emails: list[str]) -> dict:
@@ -33,7 +34,8 @@ def start(authtoken: str, domain: str, allowed_emails: list[str] | None) -> subp
     """Start the ngrok agent. Without allowed_emails there is no Google sign-in
     and the app's own password page (fallback mode) protects it instead."""
     domain = domain.removeprefix("https://").removeprefix("http://").strip("/")
-    args = [NGROK_BIN, "http", f"{config.APP_HOST}:{config.APP_PORT}",
+    binary = NGROK_BIN if os.path.exists(NGROK_BIN) else (shutil.which("ngrok") or NGROK_BIN)
+    args = [binary, "http", f"{config.APP_HOST}:{config.APP_PORT}",
             "--url", f"https://{domain}", "--log", "stdout", "--log-format", "json"]
     if allowed_emails:
         policy_file = config.WORK_DIR / "ngrok-policy.json"

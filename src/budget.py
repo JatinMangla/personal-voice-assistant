@@ -31,12 +31,14 @@ def current_meters(memory, now: datetime) -> list[Meter]:
     today = now.date()
     week_start = (today - timedelta(days=6)).isoformat()
     requests_used, bytes_used = memory.get_net(now.strftime("%Y-%m"))
-    return [
-        Meter("day", memory.get_usage(today.isoformat()), config.DAILY_LIMIT_MIN * 60),
-        Meter("week", memory.get_usage_since(week_start), config.GPU_WEEKLY_HOURS * 3600),
-        Meter("requests", requests_used, config.NGROK_MONTHLY_REQUESTS),
-        Meter("data", bytes_used, config.NGROK_MONTHLY_BYTES),
-    ]
+    meters = []
+    if not config.HOME:  # Kaggle's free GPU hours; a home PC has no such limit
+        meters += [Meter("day", memory.get_usage(today.isoformat()), config.DAILY_LIMIT_MIN * 60),
+                   Meter("week", memory.get_usage_since(week_start), config.GPU_WEEKLY_HOURS * 3600)]
+    if config.NGROK_IN_USE:
+        meters += [Meter("requests", requests_used, config.NGROK_MONTHLY_REQUESTS),
+                   Meter("data", bytes_used, config.NGROK_MONTHLY_BYTES)]
+    return meters
 
 
 def reset_time(meter: Meter, now: datetime) -> datetime:
@@ -98,8 +100,9 @@ def usage_summary(meters: list[Meter], now: datetime, stop_at: float) -> str:
         parts.append(f"Free link this month: {m['requests'].used:,.0f} of "
                      f"{m['requests'].limit:,.0f} requests and {m['data'].used / 1e6:.0f} of "
                      f"{m['data'].limit / 1e6:.0f} MB used. {describe_reset(m['requests'], now)}")
-    parts.append(f"Each session also closes after {config.IDLE_TIMEOUT_MIN} minutes without use.")
-    return " ".join(parts)
+    if config.IDLE_TIMEOUT_MIN:
+        parts.append(f"Each session also closes after {config.IDLE_TIMEOUT_MIN} minutes without use.")
+    return " ".join(parts) or "No usage limits apply: you run on the user's own computer."
 
 
 def minutes_until_stop(meter: Meter, stop_at: float) -> int | None:

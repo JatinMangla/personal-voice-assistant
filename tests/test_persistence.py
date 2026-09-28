@@ -123,3 +123,29 @@ def test_save_retries_then_reports_failure():
     fake_kaggle(store, [(1, "500"), (1, "500"), (1, "500")], calls)
     assert store.save(b"x") is False
     assert len(calls) == 3
+
+
+# --- home PC: the memory as a local encrypted file -------------------------------------
+from persistence import LocalMemoryStore  # noqa: E402
+
+
+def test_local_store_round_trip_and_first_run(tmp_path):
+    store = LocalMemoryStore(tmp_path, KEY)
+    assert store.load() is None and not store.exists       # first run
+    assert store.save(b"memory v1") and store.save(b"memory v2")
+    assert b"memory" not in (tmp_path / config.MEMORY_FILE_NAME).read_bytes()  # encrypted
+    assert LocalMemoryStore(tmp_path, KEY).load() == b"memory v2"
+    assert crypto.decrypt((tmp_path / (config.MEMORY_FILE_NAME + ".prev")).read_bytes(), KEY) \
+        == b"memory v1"                                     # one previous copy only
+    assert sorted(p.name for p in tmp_path.iterdir()) == [config.MEMORY_FILE_NAME,
+                                                          config.MEMORY_FILE_NAME + ".prev"]
+
+
+def test_local_store_never_starts_empty_over_a_real_memory(tmp_path):
+    LocalMemoryStore(tmp_path, KEY).save(b"real memory")
+    with pytest.raises(crypto.DecryptionError):             # wrong key: stop, don't start empty
+        LocalMemoryStore(tmp_path, crypto.load_key(crypto.generate_key())).load()
+    LocalMemoryStore(tmp_path, KEY).save(b"newer")
+    (tmp_path / config.MEMORY_FILE_NAME).unlink()           # interrupted save
+    with pytest.raises(StorageError, match="rename it back"):
+        LocalMemoryStore(tmp_path, KEY).load()

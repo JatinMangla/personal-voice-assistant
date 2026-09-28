@@ -322,6 +322,8 @@ class Assistant:
 
     def count_net(self, requests: int, nbytes: int) -> None:
         """Track traffic through ngrok, to stay inside the free plan."""
+        if not config.NGROK_IN_USE:
+            return
         self.memory.add_net(now_ist().strftime("%Y-%m"), requests, nbytes)
 
     def save(self) -> bool:
@@ -389,7 +391,7 @@ class Assistant:
             if over:
                 self.close("limit", over)  # blocks until the server is told to stop
                 return
-            if self.timer.idle_reached(now):
+            if config.IDLE_TIMEOUT_MIN and self.timer.idle_reached(now):
                 self.close("idle")
                 return
             if time.time() - last_save >= config.AUTOSAVE_EVERY_MIN * 60 and self.memory.dirty:

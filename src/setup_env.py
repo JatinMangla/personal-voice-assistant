@@ -31,6 +31,7 @@ class ModelPaths:
     kokoro: Path
     embed: str
     speech_device_index: int
+    device: str = "cuda"  # "cpu" on a home PC without an NVIDIA GPU
 
 
 def sh(cmd: str, **kwargs) -> None:
@@ -277,10 +278,11 @@ def install_tuned_model(key: bytes) -> str | None:
         (work / "model.gguf").unlink(missing_ok=True)  # Ollama keeps its own copy
 
 
-def _download_speech_models() -> tuple[str, Path, str]:
+def _download_speech_models(base: Path | None = None,
+                            whisper_repo: str | None = None) -> tuple[str, Path, str]:
     from huggingface_hub import snapshot_download
-    base = config.WORK_DIR / "hf"
-    whisper = snapshot_download("mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    base = base or config.WORK_DIR / "hf"
+    whisper = snapshot_download(whisper_repo or config.WHISPER_REPO,
                                 local_dir=base / "whisper")
     kokoro = snapshot_download(config.KOKORO_REPO, local_dir=base / "kokoro",
                                allow_patterns=["config.json", "*.pth",

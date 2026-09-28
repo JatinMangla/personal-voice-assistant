@@ -119,3 +119,51 @@ class MemoryStore:
             shutil.move(tmp, config.BACKUP_PATH)
         except OSError:
             pass
+
+
+class LocalMemoryStore:
+    """The encrypted memory as a file on your own PC (HOSTING = "home").
+
+    Same promises as the Kaggle store: a file that exists but can't be read stops the
+    start (never an empty memory that would overwrite it), and saving is atomic (a
+    crash mid-save leaves the old file intact). One previous copy is kept; older ones
+    are replaced, so "forget" also leaves the disk after the next save."""
+
+    def __init__(self, folder: Path, key: bytes):
+        self.path = Path(folder) / config.MEMORY_FILE_NAME
+        self.previous = self.path.with_name(self.path.name + ".prev")
+        self.key = key
+        self.exists = self.path.exists()
+        self.blocked = False
+        self.last_saved: float | None = None
+
+    def load(self) -> bytes | None:
+        if not self.path.exists():
+            if self.previous.exists():  # the last save was interrupted between the renames
+                raise StorageError(f"{self.path} is missing but {self.previous.name} exists: "
+                                   "rename it back to use it, then start again.")
+            return None  # really the first run
+        return crypto.decrypt(self.path.read_bytes(), self.key)
+
+    def save(self, plaintext: bytes, usage: dict | None = None) -> bool:
+        if self.blocked:
+            return False
+        blob = crypto.encrypt(plaintext, self.key)
+        if crypto.decrypt(blob, self.key) != plaintext:  # never write a broken file
+            raise StorageError("Encryption self-check failed.")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write(blob)
+                f.flush()
+                os.fsync(f.fileno())
+            if self.path.exists():
+                os.replace(self.path, self.previous)
+            os.replace(tmp, self.path)
+        except OSError as e:
+            print(f"[memory] could not write {self.path.name}: {type(e).__name__}")
+            return False
+        self.exists = True
+        self.last_saved = time.time()
+        return True

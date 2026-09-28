@@ -1,4 +1,4 @@
-"""Start everything. The notebook just calls run()."""
+"""Start everything. The notebook just calls run(); on a home PC, scripts/run_home.py does."""
 import os
 import subprocess
 import threading
@@ -11,7 +11,8 @@ import config
 
 def run() -> None:
     ctx: dict = {}
-    threading.Thread(target=_startup_guard, args=(ctx,), daemon=True).start()
+    if not config.HOME:  # a hung start on Kaggle would burn free GPU hours
+        threading.Thread(target=_startup_guard, args=(ctx,), daemon=True).start()
     try:
         _run(ctx)
     except BaseException:
@@ -49,29 +50,38 @@ def _record_failed_start(ctx: dict) -> None:
 def _run(ctx: dict) -> None:
     started = time.time()
     import setup_env
-    setup_env.install_basics()
+    import setup_home
+    setup = setup_home if config.HOME else setup_env
+    setup.install_basics()
 
     import crypto
     from budget import (Budget, current_meters, describe_reset, minutes_until_stop,
                         start_blocker, usage_snapshot)
     from memory import Memory
-    from persistence import MemoryStore
+    from persistence import LocalMemoryStore, MemoryStore
     from timer import SessionTimer
 
     # --- secrets (never printed) ---------------------------------------------
     key = crypto.load_key(config.get_secret("MEMORY_KEY"))
-    username, kaggle_env = config.kaggle_credentials()
-    ngrok_token = config.get_secret("NGROK_AUTHTOKEN")
-    ngrok_domain = config.get_secret("NGROK_DOMAIN")
+    # At home the tunnel is optional: without it Jarvis is reachable on this PC only.
+    ngrok_token = config.get_secret("NGROK_AUTHTOKEN", required=not config.HOME)
+    ngrok_domain = config.get_secret("NGROK_DOMAIN", required=bool(ngrok_token))
+    config.NGROK_IN_USE = bool(ngrok_token)
     allowed = config.get_secret("ALLOWED_EMAIL", required=False)
     allowed_emails = [e.strip().lower() for e in allowed.split(",") if e.strip()] if allowed else []
+    if not ngrok_token:
+        allowed_emails = []  # Google sign-in happens at ngrok, so it needs the tunnel
     password = config.get_secret("APP_PASSWORD", required=False)
-    if not allowed_emails and not password:
+    if not allowed_emails and not password and config.NGROK_IN_USE:
         raise RuntimeError("Add the ALLOWED_EMAIL secret (Google sign-in) or APP_PASSWORD. "
                            "The assistant never starts without a login.")
 
     # --- memory + free-limit check, BEFORE the slow GPU setup --------------------
-    store = MemoryStore(username, key, kaggle_env)
+    if config.HOME:
+        store = LocalMemoryStore(config.HOME_DIR, key)
+    else:
+        username, kaggle_env = config.kaggle_credentials()
+        store = MemoryStore(username, key, kaggle_env)
     data = store.load()
     print("[memory] loaded" if data else "[memory] first run: starting with empty memory")
     memory = Memory(None, data)  # embedding model is attached after setup
@@ -109,7 +119,7 @@ def _run(ctx: dict) -> None:
     reminders_module.register(reminders, lambda: datetime.now(ZoneInfo(config.TIMEZONE)))
 
     # The LLM downloads, loads (GPU 0) and warms up in the background ...
-    paths, llm_job = setup_env.prepare()
+    paths, llm_job = setup.prepare()
 
     import llm
     import tunnel
@@ -121,9 +131,9 @@ def _run(ctx: dict) -> None:
 
     # ... while the speech models load here (GPU 1); first calls are slow, so do them now.
     t = time.time()
-    device = f"cuda:{paths.speech_device_index}"
+    device = f"cuda:{paths.speech_device_index}" if paths.device == "cuda" else "cpu"
     memory.set_embedder(E5Embedder(paths.embed, device=device))
-    stt = SpeechToText(paths.whisper, paths.speech_device_index)
+    stt = SpeechToText(paths.whisper, paths.speech_device_index, paths.device)
     tts = TextToSpeech(paths.kokoro, device)
     for lang in tts.pipelines:
         tts.synthesize("Hello.", lang)
@@ -135,13 +145,13 @@ def _run(ctx: dict) -> None:
         llm_model = llm_job.result()
     except Exception as e:
         print(f"[setup] LLM start failed: {str(e)[:200]}\n[setup] Ollama log:\n"
-              f"{setup_env.ollama_log_tail()}\n[setup] reinstalling Ollama and trying once more")
-        setup_env.reinstall_ollama_online()
-        llm_model = setup_env.ensure_llm()
+              f"{setup.ollama_log_tail()}\n[setup] reinstalling Ollama and trying once more")
+        setup.reinstall_ollama_online()
+        llm_model = setup.ensure_llm()
     config.LLM_MODEL = llm_model
 
     # Phase 5: fine-tuned model, if one is attached -> blind A/B test, then the winner
-    tuned = setup_env.install_tuned_model(key)
+    tuned = setup.install_tuned_model(key)
     picker = llm.ModelPicker(llm_model, tuned, memory.rating_stats(),
                              config.TUNED_MODE, config.AB_MIN_RATINGS)
     if tuned:
@@ -160,7 +170,7 @@ def _run(ctx: dict) -> None:
                   f"({len(reply)} chars; {llm.speed_report()})")
 
     def report_devices():
-        devices = setup_env.ollama_devices()
+        devices = setup.ollama_devices()
         print(f"[setup] Ollama computes on: {', '.join(devices) or 'unknown'}")
         if devices and all(d.startswith("cpu") for d in devices):
             print("[setup] WARNING: Ollama found no GPU, so replies will be very slow. "
@@ -169,21 +179,23 @@ def _run(ctx: dict) -> None:
     try:
         warm_up_llm()
     except Exception as e:
-        print(f"[setup] LLM test failed: {e}\n[setup] Ollama log:\n{setup_env.ollama_log_tail()}")
+        print(f"[setup] LLM test failed: {e}\n[setup] Ollama log:\n{setup.ollama_log_tail()}")
         print("[setup] reinstalling Ollama from the internet and trying once more")
-        setup_env.reinstall_ollama_online()
+        setup.reinstall_ollama_online()
         warm_up_llm()
     report_devices()
     print(f"[setup] all models ready {time.time() - t:.0f}s after the speech models started")
 
     # --- web app + tunnel ---------------------------------------------------------
-    assistant = Assistant(stt, tts, memory, store, timer, restart_ollama=setup_env.start_ollama,
+    assistant = Assistant(stt, tts, memory, store, timer, restart_ollama=setup.start_ollama,
                           picker=picker, reminders=reminders)
     pending = len(reminders.pending())
     pushed = reminders.schedule_pushes(now_ist())  # the next 3 days, if ntfy is set up
     print(f"[reminders] {pending} pending" + (f", {pushed} phone notification(s) scheduled"
                                               if push else ""))
-    gate = None if allowed_emails else PasswordGate(password, key)
+    # Google sign-in (at ngrok), else the password page. Only a home PC without a tunnel
+    # may run without either: then the app is reachable from this computer alone.
+    gate = None if allowed_emails or not password else PasswordGate(password, key)
     server = uvicorn.Server(uvicorn.Config(create_app(assistant, gate), host=config.APP_HOST,
                                            port=config.APP_PORT, log_level="warning",
                                            access_log=False))
@@ -192,16 +204,23 @@ def _run(ctx: dict) -> None:
     assistant.start_url = start_url if start_url and start_url.startswith("https://") else None
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
-    ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None)
+    ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None) if ngrok_token else None
 
     timer.touch(now_ist())
     ctx["ready"] = True  # from here on the watchdog and close() record usage
     threading.Thread(target=assistant.watchdog, daemon=True).start()
-    url = "https://" + ngrok_domain.removeprefix("https://").strip("/")
-    login = "Google sign-in" if allowed_emails else "password page"
+    if ngrok_token:
+        url = "https://" + ngrok_domain.removeprefix("https://").strip("/")
+        login = "Google sign-in" if allowed_emails else "password page"
+    else:
+        url = f"http://{config.APP_HOST}:{config.APP_PORT}"
+        login = ("password page" if gate else "no login") + ", this computer only"
     print(f"\n[ready] in {time.time() - started:.0f}s  ->  {url}  ({login})")
-    print(f"[ready] closes after {config.IDLE_TIMEOUT_MIN} min without use, "
-          f"or automatically at {config.STOP_AT:.0%} of any free limit\n")
+    if config.IDLE_TIMEOUT_MIN:
+        print(f"[ready] closes after {config.IDLE_TIMEOUT_MIN} min without use, "
+              f"or automatically at {config.STOP_AT:.0%} of any free limit\n")
+    else:
+        print("[ready] always on (home PC). Stop it with Ctrl+C.\n")
 
     try:
         while server_thread.is_alive():
@@ -214,7 +233,11 @@ def _run(ctx: dict) -> None:
         assistant.stopped.set()
         if memory.dirty:
             assistant.save()
-        ngrok.terminate()
-        subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True)
-        print("[session] finished. If you used 'Run All' (not 'Save & Run All'), "
-              "click Stop Session in Kaggle now to save GPU hours.")
+        if ngrok:
+            ngrok.terminate()
+        if config.HOME:
+            print("[session] finished. Memory saved.")
+        else:
+            subprocess.run(["pkill", "-f", "ollama serve"], capture_output=True)
+            print("[session] finished. If you used 'Run All' (not 'Save & Run All'), "
+                  "click Stop Session in Kaggle now to save GPU hours.")
