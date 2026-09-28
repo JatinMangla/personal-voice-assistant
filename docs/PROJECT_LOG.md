@@ -283,6 +283,23 @@ while. The owner ran the tests and pushed themselves (163 passed, 1 skipped).
   advice, and has a `force` box.
 - 20-minute start-up guard, and download timeouts.
 
+## 2026-09-28 (night): Limits awareness, memory research
+
+- Every warning, goodbye and start-up refusal now includes the **reset time in India time**:
+  day at midnight IST, week as the oldest day drops out, link limits on the 1st of the month.
+- Jarvis gets a live **usage summary** in every prompt, so it can answer "how much GPU time is left
+  today?".
+- The owner asked whether exceeding GPU time creates a bill. **No**: there is no payment method
+  anywhere, Kaggle has no paid option, and the ngrok and GitHub free tiers just stop.
+- **Research:** vectorless RAG vs ripgrep for growing memory, written up in
+  [MEMORY_RESEARCH.md](MEMORY_RESEARCH.md).
+  - Today's method: SQLite + multilingual vectors (brute force) + structured facts.
+  - Recommendation: a hybrid (FTS5/BM25 + vectors + RRF + date/category filters). Later, a
+    time-summary tree (the useful idea from vectorless RAG) and split hot/archive storage.
+  - ripgrep was rejected: it needs plaintext files, exact words only, and slow multi-round search.
+  - PageIndex was rejected as the main method (it suits long structured documents), but its
+    tree idea is borrowed for time summaries.
+
 ## Open items / next steps
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.
 - On a real phone, confirm: loudspeaker/Bluetooth playback, PWA install and offline Start button,
