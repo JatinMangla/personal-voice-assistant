@@ -147,6 +147,14 @@ APP_PORT = 8000
 TAILSCALE_PORT = 8001
 TAILSCALE_HOSTNAME = "jarvis"          # -> https://jarvis.<your-tailnet>.ts.net
 TAILSCALE_STATE_FILE = "tailscale.tar.enc"  # saved (encrypted) next to the memory
+# Which links are open (when the TS_AUTHKEY secret is set):
+#   USE_NGROK = False -> Tailscale only: private, no public address (the owner's choice,
+#                        2026-09-30: they are the only user). Set True to also open the
+#                        public ngrok link (Google sign-in), e.g. for devices without Tailscale.
+#   NGROK_FALLBACK    -> if Tailscale fails to start, use ngrok for that run instead of
+#                        stopping (only if the ngrok secrets exist; the log says so).
+USE_NGROK = False
+NGROK_FALLBACK = True
 OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Marker file used to find the attached model cache under /kaggle/input

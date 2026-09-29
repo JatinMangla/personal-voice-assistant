@@ -289,7 +289,12 @@ scheduled the next time you start Jarvis). The notification only says "You have 
 
 With Tailscale, your phone talks to Jarvis **end-to-end encrypted**: no public address exists
 at all, only your own devices can reach it, there are no ngrok monthly limits, and the path
-is often shorter. ngrok keeps working next to it as a fallback.
+is often shorter.
+
+**As soon as the `TS_AUTHKEY` secret exists, Jarvis is Tailscale-only**: the public ngrok link
+is not opened. Only if Tailscale fails to start does it use ngrok for that run (if the ngrok
+secrets are still there), and the log says so. To open the public link as well later (e.g. for
+devices without Tailscale), set `USE_NGROK = True` in `src/config.py`.
 
 **Once, in Tailscale's admin page** (login.tailscale.com, on a laptop):
 1. **DNS** (top menu) → check that **MagicDNS** is on → scroll to **HTTPS Certificates** →
@@ -312,8 +317,8 @@ is often shorter. ngrok keeps working next to it as a fallback.
 7. On the phone, with the Tailscale app connected, open that link in Chrome → **⋮ → Add to
    Home screen**. The very first visit can take ~20 s (the certificate is being made).
 
-When you're happy with it, you can delete the `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` secrets:
-Jarvis then runs over Tailscale only (the Start button still works).
+You can keep the `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` secrets as the emergency fallback, or
+delete them; the Start button works either way.
 
 Note: https certificates are public records, so the name `jarvis.<something>.ts.net` is
 visible on the internet, but nobody outside your tailnet can connect to it.

@@ -21,7 +21,11 @@ search, link cards, price search, screen snapshots, and optional style fine-tuni
   paid or needing a credit card.
 - They rejected a passphrase at session start. They first rejected Tailscale, but on
   2026-09-30 asked for it (they already use the Tailscale app and Termux on their phone).
-  Tailscale is now the private link (`tailnet.py`); ngrok stays as fallback.
+  Tailscale is now the private link (`tailnet.py`). With TS_AUTHKEY set, Jarvis is
+  **Tailscale-only** (`config.USE_NGROK = False`, owner is the only user): ngrok is not
+  started; `main.link_plan()` keeps it only as a fallback if Tailscale fails
+  (`NGROK_FALLBACK`), and a Tailscale-only start with no fallback stops BEFORE the models
+  load. "Make it public later" = `USE_NGROK = True`.
 - They want: tap-to-talk with auto-stop on silence, 10-min idle auto-close, short answers,
   links as rich cards, YouTube app deep links, prices with the cheapest first.
 - Use they/them for the owner in any text.

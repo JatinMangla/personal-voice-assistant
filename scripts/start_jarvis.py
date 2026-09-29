@@ -236,11 +236,13 @@ def main() -> None:
     print(f"Kaggle status of {kernel}: {(status.stdout or status.stderr).strip()}")
     force = os.environ.get("JARVIS_FORCE", "").lower() in ("1", "true", "yes")
     if status.returncode == 0 and is_running(status.stdout) and not force:
-        online = link_is_online(secrets.get("NGROK_DOMAIN", ""))
+        import config
+        ngrok_used = config.USE_NGROK or not secrets.get("TS_AUTHKEY")
+        online = link_is_online(secrets.get("NGROK_DOMAIN", "") if ngrok_used else "")
         if online:
             print("Jarvis is already running and your link works. Open it.")
             return
-        if online is None and not secrets.get("NGROK_DOMAIN"):
+        if online is None and (not ngrok_used or not secrets.get("NGROK_DOMAIN")):
             # Tailscale only: a private link can't be checked from GitHub's servers.
             print("Kaggle says Jarvis is running. Open your Tailscale link; if it doesn't "
                   "answer, press 'Run workflow' again with 'force' ticked.")

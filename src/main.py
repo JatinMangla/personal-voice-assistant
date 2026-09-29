@@ -47,6 +47,15 @@ def _record_failed_start(ctx: dict) -> None:
         print(f"[budget] could not record GPU time: {type(e).__name__}: {e}")
 
 
+def link_plan(ts_authkey: str | None, ngrok: tuple[str, str] | None) -> dict:
+    """Which links to open. tailscale_only: ngrok is not started (it is kept aside as the
+    fallback in case Tailscale fails). ngrok: (token, domain) to start, or None."""
+    tailscale_only = bool(ts_authkey) and not config.USE_NGROK and not config.HOME
+    return {"tailscale_only": tailscale_only,
+            "ngrok": None if tailscale_only else ngrok,
+            "spare": ngrok if tailscale_only and config.NGROK_FALLBACK else None}
+
+
 def _run(ctx: dict) -> None:
     started = time.time()
     import setup_env
@@ -68,15 +77,20 @@ def _run(ctx: dict) -> None:
     # At home the tunnel is optional: without it Jarvis is reachable on this PC only.
     ngrok_token = config.get_secret("NGROK_AUTHTOKEN", required=not config.HOME and not ts_authkey)
     ngrok_domain = config.get_secret("NGROK_DOMAIN", required=bool(ngrok_token))
-    config.NGROK_IN_USE = bool(ngrok_token)
+    plan = link_plan(ts_authkey, (ngrok_token, ngrok_domain) if ngrok_token else None)
+    ngrok_token, ngrok_domain = plan["ngrok"] or (None, None)
     allowed = config.get_secret("ALLOWED_EMAIL", required=False)
-    allowed_emails = [e.strip().lower() for e in allowed.split(",") if e.strip()] if allowed else []
-    if not ngrok_token:
-        allowed_emails = []  # Google sign-in happens at ngrok, so it needs the tunnel
+    all_emails = [e.strip().lower() for e in allowed.split(",") if e.strip()] if allowed else []
     password = config.get_secret("APP_PASSWORD", required=False)
-    if not allowed_emails and not password and config.NGROK_IN_USE:
-        raise RuntimeError("Add the ALLOWED_EMAIL secret (Google sign-in) or APP_PASSWORD. "
-                           "The assistant never starts without a login.")
+
+    def use_ngrok_logins() -> list[str]:
+        """Google sign-in happens at ngrok, so it only applies while ngrok is used."""
+        config.NGROK_IN_USE = bool(ngrok_token)
+        if config.NGROK_IN_USE and not all_emails and not password:
+            raise RuntimeError("Add the ALLOWED_EMAIL secret (Google sign-in) or APP_PASSWORD. "
+                               "The assistant never starts without a login.")
+        return all_emails if ngrok_token else []
+    allowed_emails = use_ngrok_logins()
 
     # --- memory + free-limit check, BEFORE the slow GPU setup --------------------
     if config.HOME:
@@ -116,6 +130,15 @@ def _run(ctx: dict) -> None:
     net_thread = threading.Thread(target=lambda: net_holder.update(net=tailnet.setup(
         config.WORK_DIR, store.extras.get(config.TAILSCALE_STATE_FILE))), daemon=True)
     net_thread.start()
+    if plan["tailscale_only"]:  # the only way in: make sure it works BEFORE the GPU work
+        net_thread.join(timeout=150)
+        if not net_holder.get("net"):
+            if not plan["spare"]:
+                raise RuntimeError("Tailscale did not start (see the [tailscale] line above), and "
+                                   "there is no ngrok fallback. Stopped before loading the models.")
+            print("[tailscale] could not start, so this run uses the ngrok link (Google sign-in)")
+            ngrok_token, ngrok_domain = plan["spare"]
+            allowed_emails = use_ngrok_logins()
 
     # --- GPU setup --------------------------------------------------------------------
     if config.WEB_SEARCH:  # before the LLM warms up in the background

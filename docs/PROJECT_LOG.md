@@ -350,6 +350,23 @@ for their trigger on purpose (riskiest change to memory, not needed yet).
 **Status:** 296 tests pass (1 skipped), page JS passes `node --check`. Nothing of this has
 run on Kaggle or a device yet.
 
+## 2026-09-29/30: Samsung washer helper, Tailscale-only
+
+- Owner asked for free Samsung appliance control. SmartThings API is paid from Oct 2026;
+  built the phone home helper (`home_bridge/`, CoAP-DTLS via smartthings-local, Termux) and
+  `scripts/find_samsung.py`. First scan found nothing: the scanner missed UDP 5683/5684
+  (fixed). Owner's washer: WW12DG6B24ASTL. Waiting for their rescan + `setup_cert.py --test`.
+- Owner asked about Tailscale speed: on Kaggle ≈ same (network is 0.2–0.5 s of a 2–3 s
+  reply; relay vs direct unknown until a run), clearly faster only at home; the real gains
+  are privacy (end-to-end, no public address) and no ngrok limits. They already use the
+  Tailscale app + Termux, so they asked for it: `src/tailnet.py` (userspace tailscaled,
+  `tailscale serve`, identity saved encrypted next to the memory, second local port with a
+  Tailscale-User-Login check). They are the only user, so it is Tailscale-only by default
+  (`USE_NGROK = False`), with ngrok as a fallback only if Tailscale fails.
+- Chat: no emoji (owner's wish), Good/Bad text buttons on the latest reply only.
+- Not yet run on Kaggle: the owner needs to enable HTTPS certificates in the Tailscale admin
+  page and add the TS_AUTHKEY secret (README, "Private link with Tailscale").
+
 ## Open items / next steps
 - Next run: the checks in FUTURE_PLANS.md section 0 (old list + the new features).
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.

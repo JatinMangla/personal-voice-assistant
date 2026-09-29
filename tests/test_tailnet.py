@@ -191,3 +191,37 @@ def test_state_is_saved_encrypted_with_the_memory_and_loaded_back(tmp_path, monk
     assert again.extras == {config.TAILSCALE_STATE_FILE: b"node identity"}
     assert again.save(b"memory v2")  # not given again: the loaded state is kept
     assert (remote / config.TAILSCALE_STATE_FILE).exists()
+
+
+# --- Tailscale only (the owner's choice), ngrok only as a fallback ------------------------
+def test_link_plan(monkeypatch):
+    import main
+    ngrok = ("token", "x.ngrok-free.dev")
+    monkeypatch.setattr(config, "HOME", False)
+    monkeypatch.setattr(config, "USE_NGROK", False)
+    monkeypatch.setattr(config, "NGROK_FALLBACK", True)
+    assert main.link_plan("tskey", ngrok) == {"tailscale_only": True, "ngrok": None, "spare": ngrok}
+    assert main.link_plan(None, ngrok) == {"tailscale_only": False, "ngrok": ngrok, "spare": None}
+    monkeypatch.setattr(config, "NGROK_FALLBACK", False)
+    assert main.link_plan("tskey", ngrok)["spare"] is None
+    monkeypatch.setattr(config, "USE_NGROK", True)  # both links open ("public" later)
+    assert main.link_plan("tskey", ngrok) == {"tailscale_only": False, "ngrok": ngrok, "spare": None}
+
+
+def test_start_button_does_not_call_a_tailscale_only_jarvis_offline(monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "start_jarvis", Path(__file__).resolve().parent.parent / "scripts" / "start_jarvis.py")
+    sj = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sj)
+    for name, value in {"KAGGLE_USERNAME": "me", "KAGGLE_API_TOKEN": "KGAT_x",
+                        "MEMORY_KEY": "a" * 43 + "=", "TS_AUTHKEY": "tskey-auth-x",
+                        "ALLOWED_EMAIL": "me@gmail.com", "NGROK_AUTHTOKEN": "t",
+                        "NGROK_DOMAIN": "x.ngrok-free.dev"}.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(config, "USE_NGROK", False)
+    checked = []
+    monkeypatch.setattr(sj, "link_is_online", lambda domain: checked.append(domain) or None)
+    monkeypatch.setattr(sj, "kaggle", lambda *a: done('has status "KernelWorkerStatus.RUNNING"'))
+    sj.main()  # returns normally: "Kaggle says Jarvis is running. Open your Tailscale link"
+    assert checked == [""]  # the unused ngrok address was not checked
