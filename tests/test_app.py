@@ -188,3 +188,15 @@ def test_password_lockout():
     for _ in range(5):
         assert gate.try_login("nope") is None
     assert gate.try_login("pw") is None  # locked even with the right password
+
+
+def test_no_emoji_in_replies(make):
+    assistant, client = make(text="hello jarvis", reply=("Sure! 😊👍", " 🎉", " Price is ₹1,200 today ✅."))
+    evs = events(client.post("/api/turn", content=b"audio"))
+    said = [e["text"] for e in evs if e["type"] == "sentence"]
+    assert said == ["Sure! Price is ₹1,200 today."]
+    assert "😊" not in assistant.memory.recent_turns(1)[0][1]
+
+
+def test_no_emoji_keeps_hindi_and_rupees():
+    assert app_module.no_emoji("ठीक है 🙏 ₹500 ✨") == "ठीक है ₹500"

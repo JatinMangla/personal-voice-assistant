@@ -188,7 +188,7 @@ The page shows minutes used today and when memory was last saved.
 | "I have to pay the electricity bill of 1,200 rupees on the 5th every month" / "I paid the electricity bill" / "How much did I pay for bills?" | Bills are monthly reminders with an amount. Paying one logs it and moves it to next month; Jarvis can total the last 3 months. |
 | "Turn off the living room light" / "Is the washing machine done?" / "Who's at the door?" | Only after you connect Home Assistant (see "Home devices"). Risky actions ask "Should I …?" first and happen only after you say **yes**. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
-| Tap 👍 / 👎 under a reply | Rates it (tap again to undo). 👍 replies are what the assistant later learns your style from (Phase 5). |
+| Tap **Good** / **Bad** under the latest reply | Optional. Rates it (tap again to undo). "Good" replies are what the assistant later learns your style from (Phase 5); only the newest reply shows the buttons. Jarvis never uses emoji in the chat. |
 
 ---
 

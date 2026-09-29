@@ -87,9 +87,9 @@
   #screenPreview[hidden] { display: none; }
   .note { align-self: flex-start; max-width: 88%; font-size: 13px; color: var(--muted); }
   .rate { align-self: flex-start; display: flex; gap: 6px; margin-top: -4px; }
-  .rate button { font-size: 15px; line-height: 1; padding: 6px 10px; border-radius: 999px; cursor: pointer;
-    background: transparent; border: 1px solid var(--border); opacity: .6; }
-  .rate button.on { opacity: 1; border-color: var(--accent); background: var(--card); }
+  .rate button { font: inherit; font-size: 12px; line-height: 1; padding: 4px 10px; border-radius: 999px;
+    cursor: pointer; background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .rate button.on { color: var(--fg); border-color: var(--accent); background: var(--card); }
   /* bottom bar: status on top, then [Whisper] (mic) [Start] in one row */
   .controls { flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
     gap: 6px 14px; padding-top: 8px; border-top: 1px solid var(--border); }
@@ -368,7 +368,7 @@ async function sendTurn(blob) {
         if (!line.trim()) continue;
         const ev = JSON.parse(line);
         if (ev.type === "transcript") {
-          if (ev.text) youMsg = addMsg("you", ev.text + (usedScreen ? "  🖥" : ""));
+          if (ev.text) youMsg = addMsg("you", ev.text + (usedScreen ? " (with screen)" : ""));
         } else if (ev.type === "sentence") {
           if (!botMsg) botMsg = addMsg("bot", ev.text);
           else botMsg.textContent += " " + ev.text;
@@ -425,7 +425,7 @@ function addLinks(links) {
     body.appendChild(el("div", "title", l.title));
     if (l.price) body.appendChild(el("span", "price", l.price));
     if (l.snippet) body.appendChild(el("div", "snippet", l.snippet));
-    if (isVideo && firstVideo) body.appendChild(el("span", "play", "▶ Play on YouTube"));
+    if (isVideo && firstVideo) body.appendChild(el("span", "play", "Play on YouTube"));
     card.appendChild(body);
     if (isVideo) {
       card.addEventListener("click", (e) => { e.preventDefault(); openVideo(l.video_id); });
@@ -496,7 +496,7 @@ $("share").addEventListener("click", async () => {
   screenStream.getVideoTracks()[0].addEventListener("ended", stopSharing);  // browser's own Stop
   $("share").textContent = "⏹ Stop sharing";
   $("share").classList.add("on");
-  addNote("🖥 Sharing your screen: each time you ask, Jarvis looks at it once. Nothing is recorded or saved.");
+  addNote("Sharing your screen: each time you ask, Jarvis looks at it once. Nothing is recorded or saved.");
 });
 
 function stopSharing() {
@@ -527,11 +527,14 @@ function addNote(text) {
   $("log").scrollTop = $("log").scrollHeight;
 }
 
-// ---------- 👍 / 👎 on each reply: 👍 replies teach the assistant your style later ----------
+// ---------- Good / Bad under the latest reply: "Good" replies teach Jarvis your style later
+// (Phase 5 fine-tuning). Only the newest reply shows them, so the chat stays clean; a
+// rated row stays so you can see or undo your choice. ----------
 function addRating(turnId) {
+  document.querySelectorAll(".rate:not([data-value])").forEach((r) => r.remove());
   const row = document.createElement("div");
   row.className = "rate";
-  for (const [value, label, name] of [[1, "👍", "Good reply"], [-1, "👎", "Bad reply"]]) {
+  for (const [value, label, name] of [[1, "Good", "Good reply"], [-1, "Bad", "Bad reply"]]) {
     const b = document.createElement("button");
     b.textContent = label; b.setAttribute("aria-label", name);
     b.addEventListener("click", async () => {
@@ -657,7 +660,7 @@ async function showDueReminders() {
     remindersShown = true;
     for (const d of (await r.json()).due) {
       const when = d.due ? new Date(d.due).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
-      addNote("⏰ " + d.text + (when ? " (" + when + ")" : ""));
+      addNote("Reminder: " + d.text + (when ? " (" + when + ")" : ""));
     }
   } catch (e) {}
 }

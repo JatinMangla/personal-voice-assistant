@@ -27,6 +27,15 @@ from intents import parse_command, parse_confirmation
 from stt import AudioUnreadable
 
 _URL = re.compile(r"(https?://|www\.)\S+")
+# Emoji and pictographs (the owner wants none in the conversation). ₹, Hindi and normal
+# punctuation are outside these ranges.
+_EMOJI = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\u23E9-\u23FA"
+                    r"\uFE0F\u200D\u20E3]")
+
+
+def no_emoji(text: str) -> str:
+    text = " ".join(_EMOJI.sub("", text).split())
+    return re.sub(r"\s+([.,!?।])", r"\1", text)  # "today ✅." -> "today."
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -186,6 +195,9 @@ class Assistant:
                 screen = self._take_screen()
                 reply_parts = []
                 for sentence in self._llm_sentences(text, lang, now, model, screen):
+                    sentence = no_emoji(sentence)
+                    if not sentence:
+                        continue
                     reply_parts.append(sentence)
                     yield from self._speak(sentence, lang)
                     first_audio = first_audio or time.time() - t0
@@ -302,6 +314,9 @@ class Assistant:
         return False
 
     def _speak(self, sentence: str, lang: str, ignore_errors: bool = False):
+        sentence = no_emoji(sentence)
+        if not sentence:  # the model wrote only an emoji: nothing to show or say
+            return
         spoken = _URL.sub("", sentence).strip()  # links are shown, never read out
         if not spoken:
             yield _line(type="sentence", text=sentence, audio=None)

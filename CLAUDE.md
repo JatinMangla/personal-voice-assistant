@@ -68,7 +68,9 @@ ngrok (fixed domain, Google OAuth allowlist)  ->  FastAPI on Kaggle (src/app.py)
               + learn.reflect(): every few minutes while idle and at session end, stores
               "pattern" facts (focus, recurring interests, habits, how they like help)
   UI          fixed header top, chat scrolls, fixed bottom bar [🤫 Whisper] (mic) [▶ Start];
-              🖥 screen snapshot (desktop only), Clear (UI only), 👍/👎. The owner asked for
+              🖥 screen snapshot (desktop only), Clear (UI only), Good/Bad text buttons under the
+              LATEST reply only (owner: no emoji in the conversation; `app.no_emoji` strips
+              any the model writes, before showing, speaking and saving). The owner asked for
               NO memory button: memory is automatic (/api/facts endpoints still exist, unused)
   events: transcript, sentence(+audio), links(cards), done(turn_id for 👍/👎); after the
   reply: free-limit notices, then due reminders ("Reminder: ..."), once per session
