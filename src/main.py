@@ -13,14 +13,50 @@ def run() -> None:
     ctx: dict = {}
     if not config.HOME:  # a hung start on Kaggle would burn free GPU hours
         threading.Thread(target=_startup_guard, args=(ctx,), daemon=True).start()
+    threading.Thread(target=_heartbeat, args=(ctx,), daemon=True).start()
+    run_type = os.environ.get("KAGGLE_KERNEL_RUN_TYPE")  # "Batch" = Save & Run All
+    if run_type:
+        print(f"[setup] Kaggle run type: {run_type}")
+        _catch_stop_signal()
     try:
         _run(ctx)
-    except BaseException:
+    except BaseException as e:
+        if isinstance(e, KeyboardInterrupt):
+            print(f"[session] run interrupted while: {_phase()}")
         # A start that crashes still used GPU time: record it, so the free-limit
         # guard stays accurate.
         if "memory" in ctx and not ctx.get("ready"):
             _record_failed_start(ctx)
         raise
+
+
+def _phase() -> str:
+    return config.PHASE + (f"; {config.LLM_PHASE}" if config.LLM_PHASE else "")
+
+
+def _heartbeat(ctx: dict, every: float = 20) -> None:
+    """A line every 20 s until ready: silent steps (downloads) are visible, and if Kaggle
+    stops the run, the log shows when and during which step."""
+    start = time.time()
+    while True:
+        time.sleep(every)
+        if ctx.get("ready"):
+            return
+        print(f"[setup] still starting ({time.time() - start:.0f}s): {_phase()}")
+
+
+def _catch_stop_signal() -> None:
+    """If Kaggle (or anyone) stops the run, say so in the log before exiting; the normal
+    failed-start path then records the GPU time."""
+    import signal
+
+    def stopped(signum, frame):
+        print(f"[session] got stop signal {signum} while: {_phase()}")
+        raise SystemExit(1)
+    try:
+        signal.signal(signal.SIGTERM, stopped)
+    except (ValueError, OSError):  # not the main thread (e.g. tests)
+        pass
 
 
 def _startup_guard(ctx: dict) -> None:
@@ -180,6 +216,7 @@ def _run(ctx: dict) -> None:
     from tts import TextToSpeech
 
     # ... while the speech models load here (GPU 1); first calls are slow, so do them now.
+    config.PHASE = "loading the speech models"
     t = time.time()
     device = f"cuda:{paths.speech_device_index}" if paths.device == "cuda" else "cpu"
     memory.set_embedder(E5Embedder(paths.embed, device=device))
@@ -191,6 +228,7 @@ def _run(ctx: dict) -> None:
     list(stt.model.transcribe(np.zeros(16000, dtype=np.float32), language="en")[0])
     print(f"[setup] speech models ready in {time.time() - t:.0f}s")
 
+    config.PHASE = "waiting for the LLM"
     try:
         llm_model = llm_job.result()
     except Exception as e:
@@ -237,6 +275,7 @@ def _run(ctx: dict) -> None:
     print(f"[setup] all models ready {time.time() - t:.0f}s after the speech models started")
 
     # --- web app + tunnel ---------------------------------------------------------
+    config.PHASE = "starting the web app"
     assistant = Assistant(stt, tts, memory, store, timer, restart_ollama=setup.start_ollama,
                           picker=picker, reminders=reminders)
     pending = len(reminders.pending())

@@ -348,12 +348,16 @@ def prepare():
         steps.append(f"{name} {time.time() - t:.0f}s")
         t = time.time()
 
+    config.PHASE = "installing packages"
     install_packages(cache)
     step("packages")
+    config.PHASE = "installing ngrok"
     install_ngrok(cache)
     step("ngrok")
+    config.PHASE = "installing Ollama"
     models_dir = install_ollama(cache)
     step("ollama install")
+    config.PHASE = "starting Ollama"
     start_ollama(models_dir)
     step("ollama start")
     # The LLM gets downloaded, loaded onto GPU 0 and warmed up in the background, while
@@ -361,6 +365,7 @@ def prepare():
     pool = ThreadPoolExecutor(max_workers=1)
     llm_job = pool.submit(_prepare_llm, cache, models_dir)
     pool.shutdown(wait=False)
+    config.PHASE = "downloading the speech models"
     paths = model_paths(cache)
     step("speech downloads")
     print(f"[setup] steps: {', '.join(steps)}")
@@ -370,11 +375,14 @@ def prepare():
 def _prepare_llm(cache: Path | None, models_dir: Path) -> str:
     """Download + load + first answer of the LLM (the first answer is slow: GPU start-up)."""
     import llm
+    config.LLM_PHASE = "LLM: downloading"
     model = ensure_llm(cache, models_dir)
     t = time.time()
+    config.LLM_PHASE = "LLM: loading onto the GPU"
     llm.load_model(model)
     print(f"[setup] {model} loaded in {time.time() - t:.0f}s")
     t = time.time()
+    config.LLM_PHASE = "LLM: first answer"
     "".join(llm.stream_reply([{"role": "user", "content": "Say OK."}], model, max_tokens=5))
     print(f"[setup] {model} first answer in {time.time() - t:.0f}s")
     return model

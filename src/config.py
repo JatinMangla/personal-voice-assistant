@@ -165,6 +165,10 @@ MODELS_MARKER = "PVA_MODELS_CACHE.json"
 DOWNLOAD_FIRST = True
 # If Jarvis isn't ready this long after the run starts, it stops itself (saves GPU hours).
 STARTUP_TIMEOUT_MIN = 20
+# What start-up is doing right now (main thread / the LLM's background job), for the
+# heartbeat line every 20 s and the message if Kaggle stops the run.
+PHASE = "starting"
+LLM_PHASE = ""
 
 
 # --- Home PC (HOSTING = "home") ---------------------------------------------------------
