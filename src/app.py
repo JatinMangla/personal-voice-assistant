@@ -19,6 +19,7 @@ import config
 import digest
 import learn
 import llm
+import tailnet
 import tools
 import websearch
 from budget import (Budget, Meter, current_meters, describe_reset, minutes_until_stop,
@@ -131,6 +132,8 @@ class Assistant:
         self.budget = Budget(config.NOTIFY_AT, config.STOP_AT)
         self.notices: queue.SimpleQueue = queue.SimpleQueue()  # 90 % warnings to speak
         self.server = None  # uvicorn.Server, set by main.py
+        self.servers: list = []  # more uvicorn.Servers (the Tailscale port)
+        self.extra_files = None  # () -> {file name: bytes} saved encrypted with the memory
         self.state = "ready"
         self.last_lang = "en"
         self.goodbye_audio: bytes | None = None
@@ -366,7 +369,9 @@ class Assistant:
             try:
                 data = self.memory.to_bytes()
                 size = len(data)
-                ok = self.store.save(data, usage_snapshot(self.memory, now_ist()))
+                extras = self.extra_files() if self.extra_files else None
+                ok = self.store.save(data, usage_snapshot(self.memory, now_ist()),
+                                     **({"extras": extras} if extras else {}))
             except Exception as e:
                 print(f"[memory] save error: {type(e).__name__}: {str(e)[:200]}")
                 ok = False
@@ -404,6 +409,8 @@ class Assistant:
         self.stopped.set()
         if self.server is not None:
             self.server.should_exit = True
+        for server in self.servers:
+            server.should_exit = True
 
     def watchdog(self) -> None:
         """Background loop: usage clock, idle/limit checks, autosave, Ollama health."""
@@ -500,7 +507,8 @@ class PasswordGate:
         return None
 
 
-def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAPI:
+def create_app(assistant: Assistant, gate: PasswordGate | None = None,
+               tailnet_users: set[str] | None = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     # App files with no personal data, readable before the password page (fallback mode).
     app_files = {"/manifest.json": "application/manifest+json",
@@ -509,15 +517,29 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
                  "/apple-touch-icon.png": "image/png"}
     open_paths = {"/login", *app_files}
 
+    allowed_tailnet = tailnet.allowed_logins() if tailnet_users is None else tailnet_users
+
     @app.middleware("http")
     async def security(request: Request, call_next):
-        if gate and request.url.path not in open_paths and not gate.valid(request.cookies.get(gate.COOKIE)):
+        via_tailnet = tailnet.is_tailnet_request(request.scope)
+        if via_tailnet:
+            # `tailscale serve` sets this header and removes any copy the browser sent.
+            login = request.headers.get("tailscale-user-login", "").strip().lower()
+            if not login or login not in allowed_tailnet:
+                text = (f"Tailscale user '{login or 'unknown device'}' is not allowed. Add it to "
+                        "the ALLOWED_EMAIL or TAILSCALE_USERS secret.")
+                if request.url.path.startswith("/api/"):
+                    return JSONResponse({"error": text}, status_code=403)
+                return Response(text, status_code=403, media_type="text/plain")
+        elif gate and request.url.path not in open_paths and not gate.valid(request.cookies.get(gate.COOKIE)):
             if request.url.path.startswith("/api/"):
                 return JSONResponse({"error": "login required"}, status_code=401)
             return FileResponse(STATIC_DIR / "login.html")
         response = await call_next(request)
-        # Streamed replies are counted inside /api/turn; everything else here.
-        assistant.count_net(1, int(response.headers.get("content-length", 0)))
+        # ngrok's free limits: streamed replies are counted inside /api/turn, the rest here.
+        # Tailscale traffic has no such limit.
+        if not via_tailnet:
+            assistant.count_net(1, int(response.headers.get("content-length", 0)))
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -570,6 +592,7 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
         events: queue.Queue = queue.Queue()
 
         quiet = request.headers.get("x-quiet") == "1"  # Whisper mode on the page
+        via_tailnet = tailnet.is_tailnet_request(request.scope)
         mime = request.headers.get("content-type", "")
 
         def worker():
@@ -589,7 +612,8 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
                     sent += len(event)
                     yield event
             finally:
-                assistant.count_net(0, sent)
+                if not via_tailnet:
+                    assistant.count_net(0, sent)
 
         return StreamingResponse(stream(), media_type="application/x-ndjson")
 

@@ -24,6 +24,7 @@ class MemoryStore:
         self.exists = False
         self.blocked = False  # True = never save (protects a memory we failed to load)
         self.last_saved: float | None = None
+        self.extras: dict[str, bytes] = {}  # other small encrypted files (Tailscale state)
 
     def _kaggle(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(["kaggle", *args], env=self.env, capture_output=True,
@@ -49,6 +50,12 @@ class MemoryStore:
             if not files:
                 raise StorageError("Memory dataset exists but has no memory file in it.")
             self.exists = True
+            for extra in Path(tmp).rglob("*.enc"):  # e.g. the Tailscale identity
+                if extra.name not in (config.MEMORY_FILE_NAME, config.USAGE_FILE_NAME):
+                    try:
+                        self.extras[extra.name] = crypto.decrypt(extra.read_bytes(), self.key)
+                    except crypto.DecryptionError:
+                        pass  # optional; never blocks loading the memory
             return crypto.decrypt(files[0].read_bytes(), self.key)
 
     def _memory_dataset_exists(self) -> bool:
@@ -64,9 +71,11 @@ class MemoryStore:
             return True
         return self._kaggle("datasets", "status", self.dataset).returncode == 0
 
-    def save(self, plaintext: bytes, usage: dict | None = None, attempts: int = 3) -> bool:
+    def save(self, plaintext: bytes, usage: dict | None = None, attempts: int = 3,
+             extras: dict[str, bytes] | None = None) -> bool:
         """Upload the encrypted memory. `usage` (budget.usage_snapshot) is saved next to
-        it as its own small encrypted file, for the Start button's limit check."""
+        it as its own small encrypted file, for the Start button's limit check; `extras`
+        ({file name: bytes}, e.g. the Tailscale identity) are encrypted and saved too."""
         if self.blocked:
             return False
         blob = crypto.encrypt(plaintext, self.key)
@@ -74,6 +83,9 @@ class MemoryStore:
             raise StorageError("Encryption self-check failed.")
         self._write_backup(blob)
         usage_blob = crypto.encrypt(json.dumps(usage).encode(), self.key) if usage else None
+        extras = {**self.extras, **(extras or {})}  # keep what was loaded if not given again
+        extra_blobs = {name: crypto.encrypt(data, self.key) for name, data in extras.items()
+                       if data and name.endswith(".enc")}
 
         for attempt in range(1, attempts + 1):
             with tempfile.TemporaryDirectory() as tmp:
@@ -81,6 +93,8 @@ class MemoryStore:
                 (folder / config.MEMORY_FILE_NAME).write_bytes(blob)
                 if usage_blob:
                     (folder / config.USAGE_FILE_NAME).write_bytes(usage_blob)
+                for name, blob_ in extra_blobs.items():
+                    (folder / name).write_bytes(blob_)
                 (folder / "dataset-metadata.json").write_text(json.dumps({
                     "title": config.MEMORY_DATASET_SLUG,
                     "id": self.dataset,
@@ -97,6 +111,7 @@ class MemoryStore:
             if result.returncode == 0 and "error" not in output:
                 self.exists = True
                 self.last_saved = time.time()
+                self.extras = extras
                 return True
             print(f"[memory] upload attempt {attempt} failed: {result.stderr.strip()[-200:]}")
             if not self.exists and ("already" in output or "409" in output):
@@ -136,6 +151,7 @@ class LocalMemoryStore:
         self.exists = self.path.exists()
         self.blocked = False
         self.last_saved: float | None = None
+        self.extras: dict[str, bytes] = {}  # the home PC's own Tailscale keeps its state
 
     def load(self) -> bytes | None:
         if not self.path.exists():
@@ -145,7 +161,8 @@ class LocalMemoryStore:
             return None  # really the first run
         return crypto.decrypt(self.path.read_bytes(), self.key)
 
-    def save(self, plaintext: bytes, usage: dict | None = None) -> bool:
+    def save(self, plaintext: bytes, usage: dict | None = None,
+             extras: dict[str, bytes] | None = None) -> bool:
         if self.blocked:
             return False
         blob = crypto.encrypt(plaintext, self.key)

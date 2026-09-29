@@ -205,6 +205,7 @@ The page shows minutes used today and when memory was last saved.
 | A web page tricking Jarvis into switching something on | **Yes.** Device actions run only after *your* spoken "yes" on the very next question, checked by fixed rules, not by the AI. Only devices and actions you listed exist. |
 | The Start button reading your memory | **No, it can't.** It reads only a separate small encrypted file with usage numbers (GPU minutes, link counts), never conversations or facts. |
 | Reminder notifications | **Private by default.** The phone notification only says "You have a reminder"; the reminder text stays in your memory. |
+| ngrok seeing your traffic | **With Tailscale: yes, protected.** ngrok decrypts traffic to do the Google sign-in; the Tailscale link is encrypted from your phone to Jarvis, and Jarvis also checks your Tailscale login. |
 | Your Google/Kaggle/GitHub account is hacked | **No.** The key sits in Kaggle Secrets, and the Kaggle token (also in GitHub if you use the Start button) can run notebooks that use it. That's why 2-step verification on all three is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |
 
@@ -283,6 +284,39 @@ scheduled the next time you start Jarvis). The notification only says "You have 
    allow notifications. (Or install the ntfy app, if you prefer.)
 3. Add the secret `NTFY_TOPIC` = that name: in Kaggle (Add-ons → Secrets) **and** on GitHub
    (repo → Settings → Secrets and variables → Actions → New repository secret).
+
+## Private link with Tailscale (recommended, free)
+
+With Tailscale, your phone talks to Jarvis **end-to-end encrypted**: no public address exists
+at all, only your own devices can reach it, there are no ngrok monthly limits, and the path
+is often shorter. ngrok keeps working next to it as a fallback.
+
+**Once, in Tailscale's admin page** (login.tailscale.com, on a laptop):
+1. **DNS** (top menu) → check that **MagicDNS** is on → scroll to **HTTPS Certificates** →
+   **Enable**. (Phone browsers allow the microphone only on https pages; this gives Jarvis a
+   real https certificate.)
+2. **Settings → Keys → Generate auth key…**: Reusable **on**, Ephemeral **off**,
+   Pre-approved **on** (if shown), Expiration 90 days → **Generate** → copy the `tskey-auth-…`
+   text. (Jarvis uses it only for its very first login; after that it remembers itself.)
+3. Add the secret **TS_AUTHKEY** = that text: in Kaggle (Add-ons → Secrets, tick it for the
+   Jarvis notebook) **and** on GitHub (repo → Settings → Secrets and variables → Actions →
+   New repository secret).
+4. If you sign in to Tailscale with a different account than your `ALLOWED_EMAIL` Gmail (for
+   example with GitHub), also add **TAILSCALE_USERS** = your Tailscale login (the page tells
+   you which one if it refuses you).
+
+**Then:**
+5. Start Jarvis. The log shows `[ready]  -> https://jarvis.<something>.ts.net  (Tailscale…)`.
+6. Admin page → **Machines** → `jarvis` → **⋯** → **Disable key expiry** (otherwise it would
+   need a new login after 180 days).
+7. On the phone, with the Tailscale app connected, open that link in Chrome → **⋮ → Add to
+   Home screen**. The very first visit can take ~20 s (the certificate is being made).
+
+When you're happy with it, you can delete the `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` secrets:
+Jarvis then runs over Tailscale only (the Start button still works).
+
+Note: https certificates are public records, so the name `jarvis.<something>.ts.net` is
+visible on the internet, but nobody outside your tailnet can connect to it.
 
 ## Samsung washing machine, free (home helper on your phone)
 

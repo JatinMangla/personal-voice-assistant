@@ -63,8 +63,10 @@ def _run(ctx: dict) -> None:
 
     # --- secrets (never printed) ---------------------------------------------
     key = crypto.load_key(config.get_secret("MEMORY_KEY"))
+    # Tailscale (optional, private): with TS_AUTHKEY, ngrok becomes optional too.
+    ts_authkey = config.get_secret("TS_AUTHKEY", required=False)
     # At home the tunnel is optional: without it Jarvis is reachable on this PC only.
-    ngrok_token = config.get_secret("NGROK_AUTHTOKEN", required=not config.HOME)
+    ngrok_token = config.get_secret("NGROK_AUTHTOKEN", required=not config.HOME and not ts_authkey)
     ngrok_domain = config.get_secret("NGROK_DOMAIN", required=bool(ngrok_token))
     config.NGROK_IN_USE = bool(ngrok_token)
     allowed = config.get_secret("ALLOWED_EMAIL", required=False)
@@ -107,6 +109,13 @@ def _run(ctx: dict) -> None:
         return
     for m in budget.warnings(meters):
         print(f"[budget] warning: {m.name} is above {config.NOTIFY_AT:.0%}")
+
+    # --- Tailscale joins the tailnet in the background, while the models load ---------
+    import tailnet
+    net_holder: dict = {}
+    net_thread = threading.Thread(target=lambda: net_holder.update(net=tailnet.setup(
+        config.WORK_DIR, store.extras.get(config.TAILSCALE_STATE_FILE))), daemon=True)
+    net_thread.start()
 
     # --- GPU setup --------------------------------------------------------------------
     if config.WEB_SEARCH:  # before the LLM warms up in the background
@@ -200,17 +209,35 @@ def _run(ctx: dict) -> None:
     # Google sign-in (at ngrok), else the password page. Only a home PC without a tunnel
     # may run without either: then the app is reachable from this computer alone.
     gate = None if allowed_emails or not password else PasswordGate(password, key)
-    server = uvicorn.Server(uvicorn.Config(create_app(assistant, gate), host=config.APP_HOST,
+    web_app = create_app(assistant, gate)
+    server = uvicorn.Server(uvicorn.Config(web_app, host=config.APP_HOST,
                                            port=config.APP_PORT, log_level="warning",
                                            access_log=False))
     assistant.server = server
+    net_thread.join(timeout=120)
+    net = net_holder.get("net")
+    if net:  # the same app on a second local port: only `tailscale serve` talks to it
+        ts_server = uvicorn.Server(uvicorn.Config(web_app, host=config.APP_HOST,
+                                                  port=config.TAILSCALE_PORT, log_level="warning",
+                                                  access_log=False))
+        assistant.servers.append(ts_server)
+        threading.Thread(target=ts_server.run, daemon=True).start()
+
+        def tailscale_state():
+            blob = net.state_blob()
+            return {config.TAILSCALE_STATE_FILE: blob} if blob else {}
+        assistant.extra_files = tailscale_state
+    elif not ngrok_token and not config.HOME:
+        raise RuntimeError("No way in: Tailscale did not start and there is no ngrok secret.")
     start_url = config.get_secret("START_URL", required=False)  # e.g. GitHub Start Jarvis page
     assistant.start_url = start_url if start_url and start_url.startswith("https://") else None
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
     assistant.bridge = home_bridge
+    # The home helper uses Tailscale when it's on; only without it does ngrok need to let
+    # the helper's path past Google sign-in.
     ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None,
-                         bridge_path=bool(home_bridge)) if ngrok_token else None
+                         bridge_path=bool(home_bridge) and not net) if ngrok_token else None
     if home_bridge:
         woke = home_bridge.announce()  # the helper at home connects now
         print(f"[bridge] home helper {'told that Jarvis is up' if woke else 'not told (ntfy)'}; "
@@ -218,17 +245,26 @@ def _run(ctx: dict) -> None:
 
     timer.touch(now_ist())
     ctx["ready"] = True  # from here on the watchdog and close() record usage
+    if net and net.fresh_login:
+        assistant.save()  # keep the new Tailscale identity, so the next run is the same device
     threading.Thread(target=assistant.watchdog, daemon=True).start()
     if config.HOME:
         import local_voice  # "Hey Jarvis" on this PC's mic and speakers
         local_voice.start(assistant)
+    links = []
+    if net:
+        links.append(f"{net.url}  (Tailscale: private, your tailnet only)")
+        if not tailnet.allowed_logins():
+            print("[tailscale] WARNING: no one is allowed yet: add ALLOWED_EMAIL or TAILSCALE_USERS")
     if ngrok_token:
-        url = "https://" + ngrok_domain.removeprefix("https://").strip("/")
-        login = "Google sign-in" if allowed_emails else "password page"
-    else:
-        url = f"http://{config.APP_HOST}:{config.APP_PORT}"
-        login = ("password page" if gate else "no login") + ", this computer only"
-    print(f"\n[ready] in {time.time() - started:.0f}s  ->  {url}  ({login})")
+        links.append("https://" + ngrok_domain.removeprefix("https://").strip("/")
+                     + f"  ({'Google sign-in' if allowed_emails else 'password page'})")
+    if not links:
+        links.append(f"http://{config.APP_HOST}:{config.APP_PORT}  "
+                     f"({'password page' if gate else 'no login'}, this computer only)")
+    print(f"\n[ready] in {time.time() - started:.0f}s")
+    for link in links:
+        print(f"[ready]  -> {link}")
     if config.IDLE_TIMEOUT_MIN:
         print(f"[ready] closes after {config.IDLE_TIMEOUT_MIN} min without use, "
               f"or automatically at {config.STOP_AT:.0%} of any free limit\n")
@@ -248,6 +284,8 @@ def _run(ctx: dict) -> None:
             assistant.save()
         if ngrok:
             ngrok.terminate()
+        if net:
+            net.stop()
         if config.HOME:
             print("[session] finished. Memory saved.")
         else:

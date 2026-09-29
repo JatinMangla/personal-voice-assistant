@@ -40,6 +40,8 @@ jobs:
           HA_TOKEN: ${{ secrets.HA_TOKEN }}
           HOME_DEVICES: ${{ secrets.HOME_DEVICES }}
           BRIDGE_KEY: ${{ secrets.BRIDGE_KEY }}
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+          TAILSCALE_USERS: ${{ secrets.TAILSCALE_USERS }}
           JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
           JARVIS_FORCE: ${{ inputs.force }}
           JARVIS_EXTRA: ${{ vars.JARVIS_EXTRA || '' }}

@@ -41,7 +41,8 @@ SECRETS_FILE = "jarvis-secrets.enc"  # same name as config.SECRETS_BUNDLE_FILE
 REQUIRED = ["KAGGLE_USERNAME", "KAGGLE_API_TOKEN", "MEMORY_KEY", "NGROK_AUTHTOKEN",
             "NGROK_DOMAIN"]
 OPTIONAL = ["ALLOWED_EMAIL", "APP_PASSWORD", "START_URL", "NTFY_TOPIC", "HA_URL", "HA_TOKEN",
-            "HOME_DEVICES", "BRIDGE_KEY"]
+            "HOME_DEVICES", "BRIDGE_KEY", "TS_AUTHKEY", "TAILSCALE_USERS"]
+NGROK = ("NGROK_AUTHTOKEN", "NGROK_DOMAIN")  # optional when TS_AUTHKEY (Tailscale) is set
 RUN_KEY_LINE = 'RUN_KEY = ""'
 
 
@@ -64,7 +65,8 @@ def settings() -> dict:
 
 def collect_secrets() -> dict:
     values = {n: os.environ.get(n, "").strip() for n in REQUIRED + OPTIONAL}
-    missing = [n for n in REQUIRED if not values[n]]
+    missing = [n for n in REQUIRED if not values[n]
+               and not (n in NGROK and values["TS_AUTHKEY"])]
     if not values["ALLOWED_EMAIL"] and not values["APP_PASSWORD"]:
         missing.append("ALLOWED_EMAIL")
     if missing:
@@ -237,6 +239,11 @@ def main() -> None:
         online = link_is_online(secrets.get("NGROK_DOMAIN", ""))
         if online:
             print("Jarvis is already running and your link works. Open it.")
+            return
+        if online is None and not secrets.get("NGROK_DOMAIN"):
+            # Tailscale only: a private link can't be checked from GitHub's servers.
+            print("Kaggle says Jarvis is running. Open your Tailscale link; if it doesn't "
+                  "answer, press 'Run workflow' again with 'force' ticked.")
             return
         sys.exit(
             "Kaggle says Jarvis is running or queued, but your link is not online, so NOTHING "

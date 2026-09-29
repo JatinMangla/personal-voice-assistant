@@ -142,6 +142,11 @@ WORK_DIR = Path("/tmp/pva")
 BACKUP_PATH = Path("/kaggle/working/memory-backup.db.enc")  # ciphertext only
 APP_HOST = "127.0.0.1"  # never 0.0.0.0: only the ngrok agent may reach the app
 APP_PORT = 8000
+# Tailscale (tailnet.py): a second local port only `tailscale serve` talks to, so the app
+# knows a request came through Tailscale (and can trust its identity header).
+TAILSCALE_PORT = 8001
+TAILSCALE_HOSTNAME = "jarvis"          # -> https://jarvis.<your-tailnet>.ts.net
+TAILSCALE_STATE_FILE = "tailscale.tar.enc"  # saved (encrypted) next to the memory
 OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Marker file used to find the attached model cache under /kaggle/input
