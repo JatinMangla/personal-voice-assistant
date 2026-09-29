@@ -20,7 +20,16 @@ FIRST_CACHE_PACKAGES = [  # what the first model cache (2026-09-27) contains
     "faster-whisper==1.2.1", "kokoro==0.9.4", "soundfile", "fastapi", "uvicorn",
     "cryptography", "kaggle", "sentence-transformers",
 ]
-PIP_PACKAGES = FIRST_CACHE_PACKAGES + ["ddgs", "websockets"]  # websockets: the home helper link
+PIP_PACKAGES = FIRST_CACHE_PACKAGES + ["ddgs"]
+# Only with the home helper (BRIDGE_KEY): a WebSocket library for uvicorn. wsproto, NOT
+# websockets: two Kaggle runs were cancelled right while pip installed `websockets` (the
+# runner itself seems to use it), so it is never touched.
+BRIDGE_PACKAGES = ["wsproto"]
+
+
+def wanted_packages() -> list[str]:
+    extra = BRIDGE_PACKAGES if config.get_secret("BRIDGE_KEY", required=False) else []
+    return PIP_PACKAGES + extra
 NGROK_URL = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
 INPUT_ROOT = Path("/kaggle/input")
 
@@ -57,18 +66,19 @@ def install_basics() -> None:
 
 def install_packages(cache: Path | None) -> None:
     pip = [sys.executable, "-m", "pip", "install", "-q"]
+    packages = wanted_packages()
     if cache and (cache / "wheels").is_dir():
         offline = pip + ["--no-index", "--find-links", str(cache / "wheels")]
-        if subprocess.run(offline + PIP_PACKAGES, capture_output=True).returncode == 0:
+        if subprocess.run(offline + packages, capture_output=True).returncode == 0:
             return
         # Cache built before a package was added: install what it has, fetch only the rest.
         if subprocess.run(offline + FIRST_CACHE_PACKAGES, capture_output=True).returncode == 0:
-            missing = [p for p in PIP_PACKAGES if p not in FIRST_CACHE_PACKAGES]
+            missing = [p for p in packages if p not in FIRST_CACHE_PACKAGES]
             print(f"[setup] not in the model cache, downloading: {', '.join(missing)}")
             subprocess.run(pip + missing, check=True)
             return
         print("[setup] the model cache's packages didn't install; downloading all")
-    subprocess.run(pip + PIP_PACKAGES, check=True)
+    subprocess.run(pip + packages, check=True)
 
 
 def install_ngrok(cache: Path | None) -> None:

@@ -47,6 +47,19 @@ def _record_failed_start(ctx: dict) -> None:
         print(f"[budget] could not record GPU time: {type(e).__name__}: {e}")
 
 
+def _keep_new_identity(net, store, memory, now) -> None:
+    """Save a NEW Tailscale identity at once: if this start fails later, the next run is
+    still the same device (not jarvis-1, jarvis-2 ...)."""
+    if not net or not net.fresh_login:
+        return
+    from budget import usage_snapshot
+    blob = net.state_blob()
+    if blob and store.save(memory.to_bytes(), usage_snapshot(memory, now),
+                           extras={config.TAILSCALE_STATE_FILE: blob}):
+        net.fresh_login = False
+        print("[tailscale] new identity saved (next runs reuse it)")
+
+
 def link_plan(ts_authkey: str | None, ngrok: tuple[str, str] | None) -> dict:
     """Which links to open. tailscale_only: ngrok is not started (it is kept aside as the
     fallback in case Tailscale fails). ngrok: (token, domain) to start, or None."""
@@ -139,6 +152,7 @@ def _run(ctx: dict) -> None:
             print("[tailscale] could not start, so this run uses the ngrok link (Google sign-in)")
             ngrok_token, ngrok_domain = plan["spare"]
             allowed_emails = use_ngrok_logins()
+        _keep_new_identity(net_holder.get("net"), store, memory, now)
 
     # --- GPU setup --------------------------------------------------------------------
     if config.WEB_SEARCH:  # before the LLM warms up in the background

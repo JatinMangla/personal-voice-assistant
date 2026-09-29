@@ -20,5 +20,5 @@ torch
 tzdata
 huggingface_hub
 sounddevice
-websockets
+wsproto
 openwakeword

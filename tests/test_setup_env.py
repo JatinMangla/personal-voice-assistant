@@ -20,7 +20,19 @@ def test_ollama_devices_without_log(tmp_path, monkeypatch):
     assert setup_env.ollama_devices() == []
 
 
-def test_only_missing_packages_are_downloaded(tmp_path, monkeypatch):
+import pytest
+
+
+@pytest.mark.parametrize("bridge_key,expected", [
+    (None, ["ddgs"]),
+    ("k" * 43, ["ddgs", "wsproto"]),  # never "websockets": Kaggle's runner uses it
+])
+def test_only_missing_packages_are_downloaded(tmp_path, monkeypatch, bridge_key, expected):
+    monkeypatch.setattr(config, "_bundle_cache", {})
+    if bridge_key:
+        monkeypatch.setenv("BRIDGE_KEY", bridge_key)
+    else:
+        monkeypatch.delenv("BRIDGE_KEY", raising=False)
     (tmp_path / "wheels").mkdir()
     calls = []
 
@@ -34,4 +46,5 @@ def test_only_missing_packages_are_downloaded(tmp_path, monkeypatch):
     setup_env.install_packages(tmp_path)
     online = [c for c in calls if "--no-index" not in c]
     assert len(online) == 1
-    assert online[0][-2:] == ["ddgs", "websockets"]  # not everything again
+    assert online[0][len(online[0]) - len(expected):] == expected  # not everything again
+    assert "websockets" not in online[0]
