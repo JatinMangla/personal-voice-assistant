@@ -61,9 +61,13 @@ def install_packages(cache: Path | None) -> None:
         offline = pip + ["--no-index", "--find-links", str(cache / "wheels")]
         if subprocess.run(offline + PIP_PACKAGES, capture_output=True).returncode == 0:
             return
-        # Cache built before a package was added: install what it has, fetch the rest.
-        subprocess.run(offline + FIRST_CACHE_PACKAGES, capture_output=True)
-        print("[setup] a few packages are not in the model cache; downloading them")
+        # Cache built before a package was added: install what it has, fetch only the rest.
+        if subprocess.run(offline + FIRST_CACHE_PACKAGES, capture_output=True).returncode == 0:
+            missing = [p for p in PIP_PACKAGES if p not in FIRST_CACHE_PACKAGES]
+            print(f"[setup] not in the model cache, downloading: {', '.join(missing)}")
+            subprocess.run(pip + missing, check=True)
+            return
+        print("[setup] the model cache's packages didn't install; downloading all")
     subprocess.run(pip + PIP_PACKAGES, check=True)
 
 

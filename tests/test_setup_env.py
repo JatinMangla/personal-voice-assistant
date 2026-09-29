@@ -18,3 +18,20 @@ def test_ollama_devices_reads_startup_log(tmp_path, monkeypatch):
 def test_ollama_devices_without_log(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "WORK_DIR", tmp_path)
     assert setup_env.ollama_devices() == []
+
+
+def test_only_missing_packages_are_downloaded(tmp_path, monkeypatch):
+    (tmp_path / "wheels").mkdir()
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        offline = "--no-index" in cmd
+        # the old cache has only the first packages: installing everything offline fails
+        ok = not offline or all(p in setup_env.FIRST_CACHE_PACKAGES for p in cmd[cmd.index(str(tmp_path / "wheels")) + 1:])
+        return setup_env.subprocess.CompletedProcess(cmd, 0 if ok else 1)
+    monkeypatch.setattr(setup_env.subprocess, "run", run)
+    setup_env.install_packages(tmp_path)
+    online = [c for c in calls if "--no-index" not in c]
+    assert len(online) == 1
+    assert online[0][-2:] == ["ddgs", "websockets"]  # not everything again
