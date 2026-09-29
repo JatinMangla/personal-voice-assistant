@@ -217,6 +217,14 @@ node --check src/static/sw.js                  # and the <script> of index.html
     (closed cloud; Alexa/Google only); free routes = a local smart plug (on/off, if the
     purifier resumes after power returns) or an IR blaster if it has a remote. Owner has
     not said they have Home Assistant or a home machine for it yet.
+27. (2026-09-29, suspected, confirm on the next run) Two Kaggle runs were **cancelled**
+    (`KernelWorkerStatus.CANCEL_ACKNOWLEDGED`) ~45 s in, both while pip installed
+    `websockets`; runs that never installed it were fine. Never pip-install `websockets` on
+    Kaggle; uvicorn gets `wsproto` instead (only with BRIDGE_KEY). The **Jarvis log** button
+    (`.github/workflows/jarvis-log.yml`, `gh workflow run "Jarvis log"`) shows the status and
+    log of the last run with seconds since start. Tailscale itself started fine (4 s). A
+    cancelled first login left machines `jarvis` and `jarvis-1` in the tailnet: the owner
+    must delete old ones so the name `jarvis` is free; new logins are now saved at once.
 19. Memory safety: if a start treated an existing memory as "first run" and then `datasets
     create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
     memory must never replace the real one).
