@@ -156,8 +156,11 @@ TAILSCALE_STATE_FILE = "tailscale.tar.enc"  # saved (encrypted) next to the memo
 USE_NGROK = False
 NGROK_FALLBACK = True
 # Master switch for Tailscale. False = ignore TS_AUTHKEY and use ngrok only.
-# (2026-09-29: temporarily False to test whether Tailscale is what gets Kaggle runs cancelled.)
-USE_TAILSCALE = False
+# OFF on Kaggle: Kaggle killed every run that started Tailscale (4 of 4, ~20 s after it came
+# up, 2026-09-29), and the same run without it started fine. Getting around that would risk
+# the Kaggle account (its rules forbid circumventing the service), so Tailscale is for the
+# home PC (HOSTING = "home") only.
+USE_TAILSCALE = HOME
 OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Marker file used to find the attached model cache under /kaggle/input

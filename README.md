@@ -285,7 +285,11 @@ scheduled the next time you start Jarvis). The notification only says "You have 
 3. Add the secret `NTFY_TOPIC` = that name: in Kaggle (Add-ons → Secrets) **and** on GitHub
    (repo → Settings → Secrets and variables → Actions → New repository secret).
 
-## Private link with Tailscale (recommended, free)
+## Private link with Tailscale (home PC only)
+
+**Not on Kaggle:** Kaggle stopped every run that started Tailscale (tested 2026-09-29), and
+trying to get around that could put your Kaggle account at risk. On Kaggle, Jarvis uses the
+ngrok link with Google sign-in. The steps below are for when Jarvis runs on your own PC.
 
 With Tailscale, your phone talks to Jarvis **end-to-end encrypted**: no public address exists
 at all, only your own devices can reach it, there are no ngrok monthly limits, and the path

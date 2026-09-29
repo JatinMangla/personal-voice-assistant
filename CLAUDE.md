@@ -21,11 +21,9 @@ search, link cards, price search, screen snapshots, and optional style fine-tuni
   paid or needing a credit card.
 - They rejected a passphrase at session start. They first rejected Tailscale, but on
   2026-09-30 asked for it (they already use the Tailscale app and Termux on their phone).
-  Tailscale is now the private link (`tailnet.py`). With TS_AUTHKEY set, Jarvis is
-  **Tailscale-only** (`config.USE_NGROK = False`, owner is the only user): ngrok is not
-  started; `main.link_plan()` keeps it only as a fallback if Tailscale fails
-  (`NGROK_FALLBACK`), and a Tailscale-only start with no fallback stops BEFORE the models
-  load. "Make it public later" = `USE_NGROK = True`.
+  Tailscale is built (`tailnet.py`) but **Kaggle kills runs that use it** (gotcha 27), so
+  on Kaggle it is off (`USE_TAILSCALE = HOME`) and ngrok + Google sign-in is the link. On
+  the home PC, Tailscale-only works as designed (`USE_NGROK = False`, `link_plan()`).
 - They want: tap-to-talk with auto-stop on silence, 10-min idle auto-close, short answers,
   links as rich cards, YouTube app deep links, prices with the cheapest first.
 - Use they/them for the owner in any text.
@@ -217,10 +215,13 @@ node --check src/static/sw.js                  # and the <script> of index.html
     (closed cloud; Alexa/Google only); free routes = a local smart plug (on/off, if the
     purifier resumes after power returns) or an IR blaster if it has a remote. Owner has
     not said they have Home Assistant or a home machine for it yet.
-27. (2026-09-29, suspected, confirm on the next run) Two Kaggle runs were **cancelled**
-    (`KernelWorkerStatus.CANCEL_ACKNOWLEDGED`) ~45 s in, both while pip installed
-    `websockets`; runs that never installed it were fine. Never pip-install `websockets` on
-    Kaggle; uvicorn gets `wsproto` instead (only with BRIDGE_KEY). The **Jarvis log** button
+27. (2026-09-29, CONFIRMED) **Kaggle kills runs that start Tailscale.** 4 of 4 runs with
+    tailscaled (userspace mode) ended `KernelWorkerStatus.CANCEL_ACKNOWLEDGED` ~15-25 s after
+    "[tailscale] private link ready", with no stop signal (hard kill); the identical run with
+    `USE_TAILSCALE` off started fine. Kaggle's AUP forbids circumventing the service, so we
+    do NOT try to hide Tailscale (e.g. relay-only knobs): `config.USE_TAILSCALE = HOME`
+    (Tailscale only on the home PC). The `websockets` suspicion was wrong, but it stays out
+    (uvicorn gets `wsproto`, only with BRIDGE_KEY). The **Jarvis log** button
     (`.github/workflows/jarvis-log.yml`, `gh workflow run "Jarvis log"`) shows the status and
     log of the last run with seconds since start. Tailscale itself started fine (4 s). A
     cancelled first login left machines `jarvis` and `jarvis-1` in the tailnet: the owner

@@ -364,8 +364,12 @@ run on Kaggle or a device yet.
   Tailscale-User-Login check). They are the only user, so it is Tailscale-only by default
   (`USE_NGROK = False`), with ngrok as a fallback only if Tailscale fails.
 - Chat: no emoji (owner's wish), Good/Bad text buttons on the latest reply only.
-- Not yet run on Kaggle: the owner needs to enable HTTPS certificates in the Tailscale admin
-  page and add the TS_AUTHKEY secret (README, "Private link with Tailscale").
+- First Kaggle runs with Tailscale: it came up in 2-4 s every time, but all 4 runs were then
+  killed by Kaggle (CANCEL_ACKNOWLEDGED, no stop signal) ~15-25 s later. Added a "Jarvis
+  log" button (reads the Kaggle log from GitHub), a start-up heartbeat and a stop-signal
+  message to find it; the websockets suspicion was wrong. The same run with Tailscale off
+  started normally. Kaggle's rules forbid circumventing the service, so Tailscale stays
+  off on Kaggle (`USE_TAILSCALE = HOME`) and is kept for the home PC.
 
 ## Open items / next steps
 - Next run: the checks in FUTURE_PLANS.md section 0 (old list + the new features).
