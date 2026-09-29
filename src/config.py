@@ -155,6 +155,9 @@ TAILSCALE_STATE_FILE = "tailscale.tar.enc"  # saved (encrypted) next to the memo
 #                        stopping (only if the ngrok secrets exist; the log says so).
 USE_NGROK = False
 NGROK_FALLBACK = True
+# Master switch for Tailscale. False = ignore TS_AUTHKEY and use ngrok only.
+# (2026-09-29: temporarily False to test whether Tailscale is what gets Kaggle runs cancelled.)
+USE_TAILSCALE = False
 OLLAMA_URL = "http://127.0.0.1:11434"
 
 # Marker file used to find the attached model cache under /kaggle/input

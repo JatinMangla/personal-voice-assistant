@@ -122,7 +122,7 @@ def _run(ctx: dict) -> None:
     # --- secrets (never printed) ---------------------------------------------
     key = crypto.load_key(config.get_secret("MEMORY_KEY"))
     # Tailscale (optional, private): with TS_AUTHKEY, ngrok becomes optional too.
-    ts_authkey = config.get_secret("TS_AUTHKEY", required=False)
+    ts_authkey = config.get_secret("TS_AUTHKEY", required=False) if config.USE_TAILSCALE else None
     # At home the tunnel is optional: without it Jarvis is reachable on this PC only.
     ngrok_token = config.get_secret("NGROK_AUTHTOKEN", required=not config.HOME and not ts_authkey)
     ngrok_domain = config.get_secret("NGROK_DOMAIN", required=bool(ngrok_token))

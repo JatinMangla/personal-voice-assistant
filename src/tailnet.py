@@ -178,6 +178,8 @@ class Tailnet:
 def setup(work_dir: Path, state: bytes | None) -> Tailnet | None:
     """Start Tailscale if configured (TS_AUTHKEY on Kaggle; the Tailscale app at home).
     Never blocks the start: without it, Jarvis still runs over ngrok."""
+    if not config.USE_TAILSCALE:
+        return None
     authkey = config.get_secret("TS_AUTHKEY", required=False)
     system = config.HOME and shutil.which("tailscale") is not None
     if not authkey and not system:
