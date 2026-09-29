@@ -27,8 +27,16 @@ def log_lines(raw: str) -> list[str]:
         entries = json.loads(raw)
     except ValueError:
         return raw.splitlines()
-    text = "".join(str(e.get("data", "")) for e in entries if isinstance(e, dict))
-    return text.splitlines()
+    out, pending = [], ""
+    for e in entries:  # prefix each line with the seconds since the run started
+        if not isinstance(e, dict):
+            continue
+        pending += str(e.get("data", ""))
+        *done, pending = pending.split("\n")
+        out += [f"{float(e.get('time', 0)):7.0f}s  {line}" for line in done]
+    if pending:
+        out.append(pending)
+    return out
 
 
 def main() -> None:
