@@ -191,6 +191,13 @@ node --check src/static/sw.js                  # and the <script> of index.html
     reuses the cached prefix; `OLLAMA_NUM_PARALLEL=2` so the learning call doesn't evict the
     chat's cache. Start-up: the LLM downloads+loads+warms in a background job while the
     speech models download and load (first answer after load took ~47 s = GPU init).
+26. Devices (researched 2026-09-29): **Samsung SmartThings API becomes paid ($4.99/month
+    "Personal Plan") from October 2026** (Home Assistant docs), so the Samsung washer can't
+    be connected for ₹0 through SmartThings; free route = a power-monitoring smart plug
+    (running/finished only). **Qubo (Hero Electronix) has no Home Assistant integration**
+    (closed cloud; Alexa/Google only); free routes = a local smart plug (on/off, if the
+    purifier resumes after power returns) or an IR blaster if it has a remote. Owner has
+    not said they have Home Assistant or a home machine for it yet.
 19. Memory safety: if a start treated an existing memory as "first run" and then `datasets
     create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
     memory must never replace the real one).

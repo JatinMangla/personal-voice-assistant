@@ -77,7 +77,7 @@ change to memory (hard rule 3), and it isn't needed yet.
 |---|---|---|
 | A **Home PC** | `PVA_HOSTING=home`, `scripts/run_home.py`, `LocalMemoryStore`, CPU fallback | A PC (NVIDIA GPU ideal), README "Run on your own PC". Re-ask about Tailscale/Cloudflare only if ngrok isn't enough. |
 | B **Wake word** | `local_voice.py`, "Hey Jarvis" (openWakeWord) on the PC's mic + speakers | Home PC with a mic/speaker. Tune `WAKE_THRESHOLD` if it wakes by mistake or misses. |
-| C **Home devices** | `home.py`: Home Assistant allowlist, spoken yes unless `"confirm": false` | Home Assistant + integrations (SmartThings, Home Connect, Android TV, LocalTuya, a smart plug), `HA_URL`, `HA_TOKEN`, `HOME_DEVICES`. |
+| C **Home devices** | `home.py`: Home Assistant allowlist, spoken yes unless `"confirm": false` | Home Assistant + integrations, `HA_URL`, `HA_TOKEN`, `HOME_DEVICES`. **Samsung washer: SmartThings API is paid from Oct 2026 → use a power-monitoring plug (status only). Qubo Q400 purifier: no integration exists → local smart plug or IR blaster.** See CLAUDE.md gotcha 26. |
 | D **Cameras** | `look_at_camera`: one snapshot to Qwen3.5 vision, never stored | Cameras in Home Assistant (RTSP/ONVIF). Face recognition is not built (privacy: would need consent of people filmed). |
 | E **Utilities** | bills with payment log in `reminders.py` | Nothing. Ideas: meter readings as a tool, bill due-date alerts via ntfy. |
 
