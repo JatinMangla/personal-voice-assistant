@@ -20,7 +20,7 @@ FIRST_CACHE_PACKAGES = [  # what the first model cache (2026-09-27) contains
     "faster-whisper==1.2.1", "kokoro==0.9.4", "soundfile", "fastapi", "uvicorn",
     "cryptography", "kaggle", "sentence-transformers",
 ]
-PIP_PACKAGES = FIRST_CACHE_PACKAGES + ["ddgs"]
+PIP_PACKAGES = FIRST_CACHE_PACKAGES + ["ddgs", "websockets"]  # websockets: the home helper link
 NGROK_URL = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
 INPUT_ROOT = Path("/kaggle/input")
 

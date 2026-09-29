@@ -48,3 +48,23 @@ def test_tcp_probe():
     port = listener.getsockname()[1]
     listener.close()
     assert not fs.tcp_open("127.0.0.1", port, timeout=0.2)
+
+
+def test_coap_discovery_question_and_answer():
+    q = fs.coap_get_oic_res()
+    assert q[0] >> 6 == 1 and q[1] == 0x01 and q.endswith(b"\xb3oic\x03res")  # CoAP GET /oic/res
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind(("127.0.0.1", 0))
+
+    def answer():
+        data, addr = server.recvfrom(2048)
+        server.sendto(bytes([0x50, 0x45]) + data[2:4] + b"\xff" + b"\xa0", addr)  # 2.05 Content
+    threading.Thread(target=answer, daemon=True).start()
+    orig = fs.COAP_PORT
+    fs.COAP_PORT = server.getsockname()[1]
+    try:
+        assert fs.coap_answers("127.0.0.1")
+    finally:
+        fs.COAP_PORT = orig
+        server.close()
+    assert not fs.is_coap_reply(b"\x16\xfe\xff\x00")

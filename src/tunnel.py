@@ -16,21 +16,24 @@ import config
 NGROK_BIN = "/usr/local/bin/ngrok"  # Kaggle; at home, the ngrok found on PATH
 
 
-def traffic_policy(allowed_emails: list[str]) -> dict:
-    return {
-        "on_http_request": [
-            {"actions": [{"type": "oauth", "config": {"provider": "google"}}]},
-            {
-                "expressions": [
-                    f"!(actions.ngrok.oauth.identity.email in {json.dumps(allowed_emails)})"
-                ],
-                "actions": [{"type": "deny", "config": {"status_code": 403}}],
-            },
-        ]
-    }
+BRIDGE_PATH = "/api/bridge/"
 
 
-def start(authtoken: str, domain: str, allowed_emails: list[str] | None) -> subprocess.Popen:
+def traffic_policy(allowed_emails: list[str], bridge_path: bool = False) -> dict:
+    """Google sign-in for everything. With bridge_path, the home helper's WebSocket path
+    skips it: the app checks its BRIDGE_KEY instead (a helper can't do a Google login)."""
+    skip = f"!req.url.path.startsWith('{BRIDGE_PATH}')"
+    signed_out = f"!(actions.ngrok.oauth.identity.email in {json.dumps(allowed_emails)})"
+    oauth = {"actions": [{"type": "oauth", "config": {"provider": "google"}}]}
+    deny = {"expressions": [signed_out], "actions": [{"type": "deny", "config": {"status_code": 403}}]}
+    if bridge_path:
+        oauth["expressions"] = [skip]
+        deny["expressions"] = [f"{skip} && {signed_out}"]
+    return {"on_http_request": [oauth, deny]}
+
+
+def start(authtoken: str, domain: str, allowed_emails: list[str] | None,
+          bridge_path: bool = False) -> subprocess.Popen:
     """Start the ngrok agent. Without allowed_emails there is no Google sign-in
     and the app's own password page (fallback mode) protects it instead."""
     domain = domain.removeprefix("https://").removeprefix("http://").strip("/")
@@ -39,7 +42,7 @@ def start(authtoken: str, domain: str, allowed_emails: list[str] | None) -> subp
             "--url", f"https://{domain}", "--log", "stdout", "--log-format", "json"]
     if allowed_emails:
         policy_file = config.WORK_DIR / "ngrok-policy.json"
-        policy_file.write_text(json.dumps(traffic_policy(allowed_emails)))
+        policy_file.write_text(json.dumps(traffic_policy(allowed_emails, bridge_path)))
         args += ["--traffic-policy-file", str(policy_file)]
 
     log_path = config.WORK_DIR / "ngrok.log"

@@ -284,6 +284,13 @@ scheduled the next time you start Jarvis). The notification only says "You have 
 3. Add the secret `NTFY_TOPIC` = that name: in Kaggle (Add-ons → Secrets) **and** on GitHub
    (repo → Settings → Secrets and variables → Actions → New repository secret).
 
+## Samsung washing machine, free (home helper on your phone)
+
+Samsung's SmartThings API becomes paid in October 2026, but the washer also answers directly
+on your home Wi-Fi. A small helper on your Android phone (Termux) talks to it and passes
+messages to Jarvis: "is the washing done?", "start the washing machine" (after your "yes"),
+plus a phone notification when a wash ends. Step-by-step: [home_bridge/README.md](home_bridge/README.md).
+
 ## Home devices and cameras (Home Assistant, optional)
 
 Jarvis talks to your devices through **Home Assistant** (free, runs at home, e.g. on a

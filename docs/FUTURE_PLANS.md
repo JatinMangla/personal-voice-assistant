@@ -40,6 +40,16 @@ Then, one at a time and only when the owner wants them:
 - **Model cache rebuild:** re-run `notebooks/build_model_cache.ipynb` once (it already lists
   `ddgs`; saves ~17 s per start when the cache is used).
 
+## 0b. Samsung washer via the phone helper (built 2026-09-29, not yet run)
+
+The owner chose their Android phone as the home helper. Next steps are theirs, in
+[home_bridge/README.md](../home_bridge/README.md): Termux, rescan with the new
+`find_samsung.py` (washer ON), `setup_cert.py --test` against WW12DG6B24ASTL, BRIDGE_KEY
+secret, run `samsung_bridge.py`. If the certificate is rejected (`unknown_ca`), the washer
+needs the OCF-PKI/OwnerPSK path (SmartThings-Local docs/ocf-pki-laundry.md: not public yet).
+If the status text looks wrong, log the raw `/operational/state/vs/0` keys (not values) and
+adjust `describe()`.
+
 ## 1. Hybrid memory retrieval: DONE (verify in §0)
 
 FTS5 (TEMP tables, never saved) + vectors + RRF + recency, date/category/recall rules

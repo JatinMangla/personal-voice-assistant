@@ -1,0 +1,5 @@
+# The Jarvis home helper (samsung_bridge.py) on your phone (Termux) or a laptop at home.
+smartthings-local
+cbor2
+websockets
+requests

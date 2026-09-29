@@ -12,7 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 import config
@@ -116,6 +116,7 @@ class Assistant:
                  reminders=None):
         self.stt, self.tts, self.memory, self.store, self.timer = stt, tts, memory, store, timer
         self.reminders = reminders  # reminders.Reminders, or None
+        self.bridge = None          # bridge.HomeBridge (the home helper), or None
         self.restart_ollama = restart_ollama
         self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
         self.start_url: str | None = None  # optional START_URL secret
@@ -635,6 +636,14 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None) -> FastAP
         due = assistant.reminders.due_soon(now)
         return {"due": [{"text": r["text"], "due": r["due"]} for r in due],
                 "pending": len(assistant.reminders.pending())}
+
+    @app.websocket("/api/bridge/ws")
+    async def bridge_ws(websocket: WebSocket):
+        """The home helper (e.g. your phone at home) connects here with BRIDGE_KEY."""
+        if assistant.bridge is None:
+            await websocket.close(code=1008)
+            return
+        await assistant.bridge.serve(websocket)
 
     @app.get("/api/goodbye")
     def goodbye():

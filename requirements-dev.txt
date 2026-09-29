@@ -10,3 +10,4 @@ httpx
 requests
 tzdata
 soundfile
+cbor2

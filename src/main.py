@@ -119,6 +119,8 @@ def _run(ctx: dict) -> None:
     reminders_module.register(reminders, lambda: datetime.now(ZoneInfo(config.TIMEZONE)))
     import home  # home devices + cameras, only if HA_URL and HA_TOKEN are set
     home.setup()
+    import bridge as bridge_module  # appliances via the home helper, only with BRIDGE_KEY
+    home_bridge = bridge_module.setup()
 
     # The LLM downloads, loads (GPU 0) and warms up in the background ...
     paths, llm_job = setup.prepare()
@@ -206,7 +208,13 @@ def _run(ctx: dict) -> None:
     assistant.start_url = start_url if start_url and start_url.startswith("https://") else None
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
-    ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None) if ngrok_token else None
+    assistant.bridge = home_bridge
+    ngrok = tunnel.start(ngrok_token, ngrok_domain, allowed_emails or None,
+                         bridge_path=bool(home_bridge)) if ngrok_token else None
+    if home_bridge:
+        woke = home_bridge.announce()  # the helper at home connects now
+        print(f"[bridge] home helper {'told that Jarvis is up' if woke else 'not told (ntfy)'}; "
+              "waiting for it to connect")
 
     timer.touch(now_ist())
     ctx["ready"] = True  # from here on the watchdog and close() record usage

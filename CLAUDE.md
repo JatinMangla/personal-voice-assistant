@@ -100,6 +100,7 @@ int8), and `local_voice.py`: "Hey Jarvis" (openWakeWord) on the PC's mic and spe
 | `src/reminders.py` | Reminders, to-dos, bills + payment log, optional ntfy push. |
 | `src/home.py` | Home Assistant devices/cameras from an allowlist (`HOME_DEVICES`). |
 | `src/setup_home.py`, `src/local_voice.py` | Home-PC start-up; wake word loop. |
+| `src/bridge.py`, `home_bridge/` | Home helper link: WebSocket `/api/bridge/ws` (BRIDGE_KEY; the only path that skips ngrok OAuth, see `tunnel.traffic_policy(bridge_path=True)`), tools `appliance_status` / `appliance_control` (always spoken yes); ntfy "up" wake-up on a topic derived from the key. `home_bridge/samsung_bridge.py` runs on the owner's Android phone (Termux): Samsung washer over CoAP-DTLS with `smartthings-local` (`/operational/state/vs/0`, `x.com.samsung.da.state` Run/Pause/Ready, `/remotectrl/0`), finish notification via Termux:API. |
 | `src/websearch.py`, `src/pages.py` | Search tools, link cards, previews, prices (ddgs, no API keys). |
 | `src/llm.py`, `src/tools.py` | Prompt, streaming, tool loop, model A/B picker; tool registry: `requires_confirmation`/`confirm_if` park the call as `tools.pending` until a rule-checked spoken yes; `attach_image` for camera snapshots. |
 | `src/stt.py`, `src/tts.py`, `src/tunnel.py` | Speech in/out; ngrok with OAuth traffic policy. |
@@ -117,7 +118,8 @@ int8), and `local_voice.py`: "Hey Jarvis" (openWakeWord) on the PC's mic and spe
   `jarvis-secrets`, notebook output `build-model-cache`). Or: Kaggle editor -> Save & Run All.
 - **Secrets:** Kaggle Secrets (editor runs) *and* GitHub repo secrets (button runs):
   `KAGGLE_USERNAME, KAGGLE_API_TOKEN, MEMORY_KEY, NGROK_AUTHTOKEN, NGROK_DOMAIN, ALLOWED_EMAIL,
-  START_URL` (optional `APP_PASSWORD`, `NTFY_TOPIC`, `HA_URL`, `HA_TOKEN`, `HOME_DEVICES`). Button runs get them via a one-time-key encrypted
+  START_URL` (optional `APP_PASSWORD`, `NTFY_TOPIC`, `HA_URL`, `HA_TOKEN`, `HOME_DEVICES`,
+  `BRIDGE_KEY`). Button runs get them via a one-time-key encrypted
   private dataset `jarvis-secrets` + `RUN_KEY` injected into the pushed notebook.
 - ngrok domain: `volley-gnarly-constable.ngrok-free.dev`. GitHub repo: `JatinMangla/personal-voice-assistant` (private).
 
@@ -200,8 +202,10 @@ node --check src/static/sw.js                  # and the <script> of index.html
     remaining time); Method 2 = CoAP-DTLS on UDP 49152-49160 (newer, Tizen RT 3.x/DAWIT
     3.0+; github.com/QuiteYellow/SmartThings-Local Python lib, HA: mbillow/localthings).
     Both need a device on the home Wi-Fi (Kaggle can't reach the LAN).
-    `scripts/find_samsung.py` tells which method an appliance speaks. Don't run it on the
-    office network. **Qubo (Hero Electronix) has no Home Assistant integration**
+    `scripts/find_samsung.py` tells which method an appliance speaks (OCF discovery 5683,
+    DTLS 5684/4915x, TCP 8888). Don't run it on the office network. Owner's washer:
+    **WW12DG6B24ASTL** (2024 DG; the SmartThings-Local tested list has a WW11DG). First scan
+    (old scanner without 5683/5684) found nothing; rescan pending, then setup_cert.py --test. **Qubo (Hero Electronix) has no Home Assistant integration**
     (closed cloud; Alexa/Google only); free routes = a local smart plug (on/off, if the
     purifier resumes after power returns) or an IR blaster if it has a remote. Owner has
     not said they have Home Assistant or a home machine for it yet.
