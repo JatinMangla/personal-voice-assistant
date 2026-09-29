@@ -193,8 +193,15 @@ node --check src/static/sw.js                  # and the <script> of index.html
     speech models download and load (first answer after load took ~47 s = GPU init).
 26. Devices (researched 2026-09-29): **Samsung SmartThings API becomes paid ($4.99/month
     "Personal Plan") from October 2026** (Home Assistant docs), so the Samsung washer can't
-    be connected for ₹0 through SmartThings; free route = a power-monitoring smart plug
-    (running/finished only). **Qubo (Hero Electronix) has no Home Assistant integration**
+    be connected for ₹0 through SmartThings. **Free local routes exist** (community,
+    reverse-engineered, MIT): Method 1 = HTTPS on TCP 8888 (~2018-2022 models; client cert
+    signed with Samsung's publicly known AC14K_M CA + token the appliance posts back to port
+    8889; github.com/perseus177/ha-samsung-washer-local; start/pause/stop, programme,
+    remaining time); Method 2 = CoAP-DTLS on UDP 49152-49160 (newer, Tizen RT 3.x/DAWIT
+    3.0+; github.com/QuiteYellow/SmartThings-Local Python lib, HA: mbillow/localthings).
+    Both need a device on the home Wi-Fi (Kaggle can't reach the LAN).
+    `scripts/find_samsung.py` tells which method an appliance speaks. Don't run it on the
+    office network. **Qubo (Hero Electronix) has no Home Assistant integration**
     (closed cloud; Alexa/Google only); free routes = a local smart plug (on/off, if the
     purifier resumes after power returns) or an IR blaster if it has a remote. Owner has
     not said they have Home Assistant or a home machine for it yet.
