@@ -158,3 +158,50 @@ def test_turn_mentions_due_reminder_and_page_lists_it(embedder, monkeypatch):
     assert said == ["Hi.", "Reminder: take medicine."]
     said = [e["text"] for e in events(client.post("/api/turn", content=b"a")) if e["type"] == "sentence"]
     assert said == ["Hi."]  # only once per session
+
+
+# --- the Android app rings at the due time itself ---------------------------------------
+def test_for_phone_lists_timed_pending_reminders(r):
+    r.add("call mom", NOW, "2026-09-28 18:00")
+    r.add("buy milk", NOW)  # a to-do without a time: nothing to ring
+    r.add("water plants", NOW, "2026-09-20 08:00", "daily")  # past, but it repeats
+    r.add("old one", NOW, "2026-09-01 08:00")  # long past, no repeat: skipped
+    rows = r.for_phone(NOW)
+    assert [(x["text"], x["due"], x["repeat"]) for x in rows] == [
+        ("water plants", "2026-09-20T08:00", "daily"), ("call mom", "2026-09-28T18:00", None)]
+
+
+def test_fingerprint_changes_with_the_list(r):
+    empty = r.fingerprint()
+    r.add("call mom", NOW, "2026-09-28 18:00")
+    one = r.fingerprint()
+    assert one != empty and r.fingerprint() == one
+    r.add("buy milk", NOW)  # no due time: the phone doesn't care
+    assert r.fingerprint() == one
+    r.complete("call mom", NOW)
+    assert r.fingerprint() == empty
+
+
+def test_paired_phone_changes_what_jarvis_promises(r):
+    said = r.add("call mom", NOW, "2026-09-28 18:00")
+    assert "can't ring" in said
+    r.phone_app = lambda: True
+    said = r.add("call dad", NOW, "2026-09-28 19:00")
+    assert "notification is scheduled" in said
+    assert "phone notification" in r.prompt_summary(NOW)
+
+
+def test_app_reminders_endpoint_and_fingerprint_in_status(embedder):
+    memory = Memory(embedder)
+    reminders = rem.Reminders(memory)
+    a = app_module.Assistant(None, FakeTTS(), memory, FakeStore(), SessionTimer(NOW, 600),
+                             reminders=reminders)
+    c = TestClient(app_module.create_app(a))
+    reminders.add("call mom", NOW, "2099-01-01 18:00")
+    body = c.get("/api/app/reminders").json()
+    assert body["reminders"][0]["text"] == "call mom" and body["timezone"] == "Asia/Kolkata"
+    assert body["fingerprint"] == c.get("/api/status").json()["reminders"] == reminders.fingerprint()
+    assert not reminders.phone_app()
+    token = a.devices.mint("Phone", NOW)
+    c.get("/api/app/hello", headers={"X-Jarvis-App": "1", "Authorization": f"Bearer {token}"})
+    assert reminders.phone_app()

@@ -15,6 +15,8 @@ Bills: a reminder with an amount. Marking it paid logs the payment (for "how muc
 pay for electricity?") and moves a repeating one to its next date.
 """
 import calendar
+import hashlib
+import json
 import re
 from datetime import datetime, timedelta
 
@@ -104,6 +106,9 @@ class Reminders:
     def __init__(self, memory, push: "Push | None" = None):
         self.memory = memory
         self.push = push
+        # True when the Jarvis Android app is paired: it rings at the due time by itself
+        # (it syncs the list below whenever it's open while Jarvis runs).
+        self.phone_app = lambda: False
         self.announced: set[int] = set()  # told this session already
         with memory.lock:
             memory.conn.executescript(SCHEMA)  # saved with the memory from now on
@@ -144,7 +149,8 @@ class Reminders:
              due_at.isoformat(timespec="minutes") if due_at else None, repeat, amount))
         row = self.get(rid)
         pushed = self.schedule_pushes(now) and row["due"]
-        return (f"Saved: {describe(row, now)}. " + self._honesty(bool(pushed)))
+        return (f"Saved: {describe(row, now)}. "
+                + self._honesty(bool(pushed) or bool(row["due"] and self.phone_app())))
 
     def _honesty(self, pushed: bool) -> str:
         if pushed:
@@ -228,9 +234,27 @@ class Reminders:
         if not rows:
             return None
         how = ("when the user opens you, and a phone notification at the due time"
-               if self.push else "only when the user opens you (you can't ring while off)")
+               if self.push or self.phone_app()
+               else "only when the user opens you (you can't ring while off)")
         return (f"The user's reminders and to-dos (you tell them {how}):\n"
                 + "\n".join(f"- {describe(r, now)}" for r in rows))
+
+    def for_phone(self, now: datetime, limit: int = 100) -> list[dict]:
+        """Reminders with a due time that isn't long past, for the phone app's alarms
+        (it computes later repeats itself). Due times are India time 'YYYY-MM-DDTHH:MM'."""
+        since = (now.replace(tzinfo=None) - timedelta(days=1)).isoformat(timespec="minutes")
+        rows = self._rows("SELECT id, text, due, repeat FROM reminders WHERE done = 0 AND "
+                          "due IS NOT NULL AND (due >= ? OR repeat IS NOT NULL) "
+                          "ORDER BY due LIMIT ?", (since, limit))
+        return rows
+
+    def fingerprint(self) -> str:
+        """Changes whenever a pending reminder is added, changed or done: the app fetches
+        the list only then (each fetch is a request on ngrok's free plan)."""
+        rows = self._rows("SELECT id, text, due, repeat FROM reminders WHERE done = 0 "
+                          "AND due IS NOT NULL ORDER BY id")
+        blob = json.dumps(rows, ensure_ascii=False, sort_keys=True).encode()
+        return hashlib.sha256(blob).hexdigest()[:16]
 
     def to_announce(self, now: datetime) -> list[dict]:
         """Due or overdue reminders not yet told this session (then marked as told)."""

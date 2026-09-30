@@ -126,6 +126,8 @@ class Assistant:
         self.stt, self.tts, self.memory, self.store, self.timer = stt, tts, memory, store, timer
         self.reminders = reminders  # reminders.Reminders, or None
         self.devices = devices_module.Devices(memory)  # paired phones (the Android app)
+        if reminders:
+            reminders.phone_app = lambda: any(d["paired"] for d in self.devices.list())
         self.bridge = None          # bridge.HomeBridge (the home helper), or None
         self.restart_ollama = restart_ollama
         self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
@@ -228,7 +230,8 @@ class Assistant:
                 yield from self._speak(notice_text(self.notices.get(), lang), lang)
             for sentence in self._due_reminders(lang, now):  # once per session each
                 yield from self._speak(sentence, lang)
-            yield _line(type="done", heard=True, turn_id=turn_id)
+            yield _line(type="done", heard=True, turn_id=turn_id,
+                        reminders=self.reminders.fingerprint() if self.reminders else None)
         except Exception as e:
             print(f"[turn] error: {type(e).__name__}: {str(e)[:200]}")
             yield from self._speak(PHRASES.get(self.last_lang, PHRASES["en"])["error"],
@@ -364,6 +367,7 @@ class Assistant:
             "notify_pct": round(config.NOTIFY_AT * 100),
             "stop_pct": round(config.STOP_AT * 100),
             "start_url": self.start_url,  # the page's "Start Jarvis" button while offline
+            "reminders": self.reminders.fingerprint() if self.reminders else None,
         }
 
     def count_net(self, requests: int, nbytes: int) -> None:
@@ -714,6 +718,14 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None,
         due = assistant.reminders.due_soon(now)
         return {"due": [{"text": r["text"], "due": r["due"]} for r in due],
                 "pending": len(assistant.reminders.pending())}
+
+    @app.get("/api/app/reminders")
+    def app_reminders():
+        """For the phone app: it rings at the due time itself, even while Jarvis is off."""
+        if not assistant.reminders:
+            return {"reminders": [], "fingerprint": None, "timezone": config.TIMEZONE}
+        return {"reminders": assistant.reminders.for_phone(now_ist()),
+                "fingerprint": assistant.reminders.fingerprint(), "timezone": config.TIMEZONE}
 
     @app.websocket("/api/bridge/ws")
     async def bridge_ws(websocket: WebSocket):
