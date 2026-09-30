@@ -418,6 +418,10 @@ run on Kaggle or a device yet.
   song/video/price/suggestion requests by rules and searches before the model answers (cards
   arrive first); in the app a "play" request opens the video in YouTube after the reply.
   Also: screen sharing in the app (MediaProjection + bubble), app 0.2.0.
+- Same day: prices showed cards, songs still didn't. Most likely cause: Whisper wrote the
+  owner's English in Devanagari ("प्ले केसरिया"), which the rules didn't know. Added the
+  Devanagari spellings (प्ले, सजेस्ट, सॉन्ग्स, म्यूजिक, प्राइस …) and made video search read
+  YouTube's own results page first (ddgs videos as backup; DuckDuckGo often rate-limits).
 
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests

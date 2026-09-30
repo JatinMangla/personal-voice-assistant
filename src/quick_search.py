@@ -29,23 +29,32 @@ class Search:
 
 
 _LEADING = re.compile(
-    rf"^\s*(?:(?:hey|ok|okay|hi|hello)\s+)?(?:{ASSISTANT_NAME}\s*)?[,!.:]?\s*", re.I)
+    rf"^\s*(?:(?:hey|ok|okay|hi|hello|हे|ओके)\s+)?(?:(?:{ASSISTANT_NAME}|जार्विस|जारविस)\s*)?[,!.:]?\s*",
+    re.I)
 _PUNCT = re.compile(r"[?!.,।\"“”]+")
 
 # "play" as a verb (not "play a game", "play store", "screenplay")
 _PLAY_EN = r"\b(?:play|put on|start playing)\b(?!\s+(?:a\s+)?(?:game|games|with me|chess|quiz|store)\b)"
 _PLAY_HI = (r"\b(?:bajao|baja\s*do|bajaiye|bajana|chalao|chala\s*do|chalaiye|sunao|suna\s*do|"
             r"sunaiye|lagao|laga\s*do|dikhao|dikha\s*do)\b|बजाओ|बजा\s*दो|बजाइए|बजाना|चलाओ|चला\s*दो|"
-            r"चलाइए|सुनाओ|सुना\s*दो|सुनाइए|लगाओ|लगा\s*दो|दिखाओ|दिखा\s*दो")
+            r"चलाइए|सुनाओ|सुना\s*दो|सुनाइए|लगाओ|लगा\s*दो|दिखाओ|दिखा\s*दो|"
+            # Whisper often writes English words in Devanagari ("प्ले केसरिया").
+            + _words("प्ले", r"प्ले\s+करो", r"प्ले\s+कर\s+दो", r"प्ले\s+कीजिए", "प्लेय"))
+_NOT_PLAY = r"\bplay\s*(?:store|station)\b|प्ले\s*स्टोर|प्ले\s*स्टेशन"
 _MEDIA = (r"\b(?:songs?|music|video|videos|youtube|trailer|playlist|bhajans?|gaana|gaane|gana|"
-          r"gane|geet|qawwali|ghazal)\b|गाना|गाने|गीत|भजन|वीडियो|यूट्यूब|संगीत|ग़ज़ल|कव्वाली")
+          r"gane|geet|qawwali|ghazal)\b|गाना|गाने|गीत|भजन|वीडियो|यूट्यूब|संगीत|ग़ज़ल|कव्वाली|"
+          + _words("सॉन्ग", "सॉन्ग्स", "सोंग", "सोंग्स", "सांग", "सांग्स", "म्यूजिक", "म्यूज़िक",
+                   "प्लेलिस्ट", "ट्रेलर", "वीडियोज़", "वीडियोस"))
 _SUGGEST = (r"\b(?:suggest|recommend|recommendations?|some|best|top|good|latest|new|newest|"
-            r"popular|trending|link|links)\b|सुझाओ|अच्छे|नए|नया|लेटेस्ट")
-_LATEST = r"\b(?:latest|new|newest|recent|naya|naye|nayi)\b|नया|नए|नई|लेटेस्ट"
+            r"popular|trending|link|links)\b|सुझाओ|अच्छे|नए|नया|लेटेस्ट|"
+            + _words("सजेस्ट", "सुजेस्ट", "रेकमेंड", "रिकमेंड", "रिकमंड", "कुछ", "बेस्ट", "टॉप",
+                     "न्यू", "पॉपुलर", "ट्रेंडिंग", "लिंक"))
+_LATEST = r"\b(?:latest|new|newest|recent|naya|naye|nayi)\b|नया|नए|नई|लेटेस्ट|" + _words("न्यू")
 
 _PRICE = (r"\b(?:price|prices|pricing|cost of|costs?|cheapest|best deal|kitne\s+ka|kitna\s+ka|"
           r"kitne\s+ki|kitne\s+mein|daam|dam|keemat|kimat|rate of)\b|कीमत|क़ीमत|दाम|कितने\s+का|"
-          r"कितने\s+की|कितने\s+में|सबसे\s+सस्ता|सस्ता")
+          r"कितने\s+की|कितने\s+में|सबसे\s+सस्ता|सस्ता|"
+          + _words("प्राइस", "प्राइज", "कॉस्ट", "चीपेस्ट"))
 # Questions about Jarvis's own limits or the user's bills are not shopping.
 _NOT_SHOPPING = (r"\b(?:bill|bills|paid|pay|gpu|limit|limits|ngrok|electricity|rent|emi|"
                  r"subscription)\b|बिल|भुगतान")
@@ -53,11 +62,12 @@ _NOT_SHOPPING = (r"\b(?:bill|bills|paid|pay|gpu|limit|limits|ngrok|electricity|r
 # "Suggest a good laptop", "recommend restaurants in Noida", "कोई अच्छी किताब सुझाओ":
 # searched first too, so the answer comes with link cards.
 _ADVICE = (r"\b(?:suggest|suggestions?|recommend|recommendations?|sujhao|sujhav|batao koi)\b|"
-           r"सुझाओ|सुझाव|सुझाइए")
+           r"सुझाओ|सुझाव|सुझाइए|" + _words("सजेस्ट", "सुजेस्ट", "रेकमेंड", "रिकमेंड", "रिकमंड"))
 _FILLER_ADVICE = (
     r"\b(?:please|pls|can you|could you|would you|will you|me|mujhe|some|a few|few|any|koi|"
     r"kuch|suggest|suggestions?|recommend|recommendations?|sujhao|sujhav|batao|for me)\b",
-    _words("मुझे", "कुछ", "कोई", "सुझाओ", "सुझाव", "सुझाइए", "दो", "दीजिए"),
+    _words("मुझे", "कुछ", "कोई", "सुझाओ", "सुझाव", "सुझाइए", "दो", "दीजिए", "सजेस्ट", "सुजेस्ट",
+           "रेकमेंड", "रिकमेंड", "रिकमंड", "करो", "सम", "मी", "प्लीज़", "प्लीज"),
 )
 
 _FILLER_VIDEO = (
@@ -65,7 +75,9 @@ _FILLER_VIDEO = (
     r"\b(?:please|pls|plz|can you|could you|would you|will you|for me|me|mujhe|mere liye|zara|"
     r"jara|kar\s*do|karo|do|now|abhi|some|suggest|recommend|a few|few)\b",
     r"\b(?:on|in|from|pe|par|par se)\s+(?:youtube|you tube)\b|\byoutube\s+(?:pe|par|on)\b",
-    r"यूट्यूब\s+(?:पर|पे)", _words("मुझे", "ज़रा", "जरा", r"कर\s+दो", "प्लीज़", "सुझाओ", "कुछ"),
+    r"यूट्यूब\s+(?:पर|पे)",
+    _words("मुझे", "ज़रा", "जरा", r"कर\s+दो", "करो", "प्लीज़", "प्लीज", "सुझाओ", "कुछ", "सम", "मी",
+           "सजेस्ट", "सुजेस्ट", "रेकमेंड", "रिकमेंड", "ऑन", "यूट्यूब"),
     r"\b(?:the\s+)?(?:youtube\s+)?(?:video|link)\s+(?:of|for)\b",
 )
 _FILLER_PRICE = (
@@ -75,7 +87,8 @@ _FILLER_PRICE = (
     r"ka|ki|ke|hai|mein|milega|milegi|batao|bataiye|bata do|daam|dam|keemat|kimat|kya|sabse|"
     r"sasta|saste|abhi)\b",
     _words("कीमत", "क़ीमत", "दाम", "कितने", "कितना", "का", "की", "के", "है", "में", "मिलेगा",
-           "बताओ", "बताइए", "क्या", "सबसे", "सस्ता", "सस्ते", "अभी"),
+           "बताओ", "बताइए", "क्या", "सबसे", "सस्ता", "सस्ते", "अभी", "प्राइस", "प्राइज", "कॉस्ट",
+           "चीपेस्ट", "ऑफ", "द", "व्हाट", "इज़", "इज"),
 )
 
 
@@ -95,7 +108,7 @@ def detect(text: str) -> Search | None:
     cleaned = " ".join(cleaned.split())
     if not cleaned:
         return None
-    play = _has(_PLAY_EN, cleaned) or _has(_PLAY_HI, cleaned)
+    play = (_has(_PLAY_EN, cleaned) or _has(_PLAY_HI, cleaned)) and not _has(_NOT_PLAY, cleaned)
     media = _has(_MEDIA, cleaned)
     youtube = _has(r"\byoutube\b|यूट्यूब", cleaned)
     if play or youtube or (media and _has(_SUGGEST, cleaned)):

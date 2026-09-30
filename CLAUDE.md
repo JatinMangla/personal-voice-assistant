@@ -265,6 +265,15 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
     Presence of the header is also what makes `app.py` demand the token: keep both rules
     identical, or an app-header request could slip past both checks.
 
+30. (2026-10-01) With the owner's accent, Whisper often writes English words in
+    Devanagari ("प्ले केसरिया", "सजेस्ट सम रोमांटिक सॉन्ग्स"): any word rule
+    (quick_search.py, intents.py) needs the Devanagari spellings too, matched as whole
+    words with `_words()` (regex `\b` breaks on Hindi vowel signs). Songs/prices then worked
+    only after that. Video search reads YouTube's own results page first (`websearch._youtube`,
+    free, no key; `sp=EgIIBQ==` = this year's uploads for "latest"); ddgs videos is the backup.
+31. Tooling: shell heredocs in this environment can halve backslashes (`\n` became a real
+    newline, `\a` a bell). Write code containing backslashes with the Write/Edit tools.
+
 ## Status (2026-10-01): read this first
 - **Android app built (plan phases 0-7), PWA removed.** Not yet run on a phone: next job is
   FUTURE_PLANS §0a with the owner (install from github.com/JatinMangla/jarvis-app, pair via

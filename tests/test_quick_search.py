@@ -48,6 +48,67 @@ def test_other_suggestions_search_the_web_first(text, words):
     assert (found.tool, found.arguments["query"], found.play) == ("web_search", words, False)
 
 
+@pytest.mark.parametrize("text,tool,words,play", [
+    # Whisper often writes English words in Devanagari (seen with an Indian accent)
+    ("प्ले केसरिया", "find_video", "केसरिया", True),
+    ("जार्विस, प्ले केसरिया", "find_video", "केसरिया", True),
+    ("केसरिया प्ले करो", "find_video", "केसरिया", True),
+    ("सजेस्ट सम रोमांटिक सॉन्ग्स", "find_video", "रोमांटिक सॉन्ग्स", False),
+    ("म्यूजिक प्ले करो", "find_video", "म्यूजिक", True),
+    ("प्राइस ऑफ बोट एयरडोप्स 141", "find_prices", "बोट एयरडोप्स 141", False),
+    ("Hey Jarvis, can you play Kesariya song?", "find_video", "Kesariya song", True),
+])
+def test_english_words_in_devanagari_and_other_transcripts(text, tool, words, play):
+    found = quick_search.detect(text)
+    key = "query" if tool == "find_video" else "product"
+    assert (found.tool, found.arguments[key], found.play) == (tool, words, play)
+
+
+@pytest.mark.parametrize("text", ["प्ले स्टोर खोलो", "open play store", "प्लेस्टेशन क्या है"])
+def test_play_store_is_not_a_song(text):
+    assert quick_search.detect(text) is None
+
+
+def test_youtube_search_page_is_read(monkeypatch):
+    data = {"contents": {"x": [{"videoRenderer": {
+        "videoId": "BddP6PYo2gs", "title": {"runs": [{"text": "Kesariya - Brahmastra"}]},
+        "ownerText": {"runs": [{"text": "Sony Music India"}]}, "lengthText": {"simpleText": "2:53"},
+        "publishedTimeText": {"simpleText": "4 years ago"}}},
+        {"videoRenderer": {"videoId": "bad id!"}}]}}
+    html = f"<script>var ytInitialData = {json.dumps(data)};</script>"
+    seen = {}
+
+    class Resp:
+        text = html
+
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, params=None, **kw):
+        seen.update(params)
+        return Resp()
+    monkeypatch.setattr(websearch.requests, "get", fake_get)
+    found = websearch._youtube("Kesariya", latest=True)
+    assert found == [{"title": "Kesariya - Brahmastra", "content": "https://www.youtube.com/watch?v=BddP6PYo2gs",
+                      "publisher": "YouTube", "duration": "2:53", "uploader": "Sony Music India",
+                      "published": "4 years ago"}]
+    assert seen["search_query"] == "Kesariya" and seen["sp"]  # this year's uploads
+
+
+def test_duckduckgo_is_the_backup_when_youtube_fails(monkeypatch):
+    def broken(*a, **k):
+        raise OSError("blocked")
+    monkeypatch.setattr(websearch, "_youtube", broken)
+
+    class FakeDDGS:
+        def videos(self, query, **kw):
+            return [{"title": "Kesariya", "content": "https://www.youtube.com/watch?v=BddP6PYo2gs"}]
+    import sys
+    import types
+    monkeypatch.setitem(sys.modules, "ddgs", types.SimpleNamespace(DDGS=FakeDDGS))
+    assert websearch._videos("Kesariya", False)[0]["title"] == "Kesariya"
+
+
 def test_latest_is_noticed():
     assert quick_search.detect("play Arijit Singh's latest song").arguments["latest"] is True
     assert quick_search.detect("naye punjabi gaane chalao").arguments["latest"] is True

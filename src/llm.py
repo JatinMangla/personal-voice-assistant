@@ -35,7 +35,9 @@ def system_prompt(lang: str, facts: list[str], related: list[str], now: datetime
     if "web_search" in tools.REGISTRY:
         parts.append("Internet tools: web_search for news, recent events or facts you are "
                      "unsure about. find_video when the user wants to listen to, watch or "
-                     "play something (e.g. a song) or asks for a YouTube link. find_prices "
+                     "play something (e.g. a song), wants song or video suggestions, or asks "
+                     "for a YouTube link: ALWAYS call it then; never say you are playing "
+                     "something that no tool found. find_prices "
                      "for prices or the cheapest option: name the cheapest shop and price. "
                      "Links appear on the user's screen as cards automatically; just say "
                      "\"it's on your screen\". Never read out web addresses.")

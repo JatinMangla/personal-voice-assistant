@@ -13,6 +13,8 @@ Privacy: only the search words the assistant chooses are sent, never your memory
 Safety: web pages are untrusted, so results are passed to the LLM as data only,
 and searching can't trigger any other action.
 """
+import json
+import re
 from urllib.parse import urlparse
 
 import requests
@@ -116,7 +118,57 @@ def web_search(query: str) -> str:
 
 
 # --- videos --------------------------------------------------------------------------
+_YT_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+               "Accept-Language": "en-IN,en;q=0.9"}
+
+
+def _youtube(query: str, latest: bool = False, limit: int = 4) -> list[dict]:
+    """YouTube's own search page (free, no key): the most relevant videos, in the same shape
+    as ddgs video results. Only the page's embedded search data is read. latest: uploads
+    from this year only (tested: "this month" mixes in other artists' songs)."""
+    params = {"search_query": query, "hl": "en", "gl": "IN"}
+    if latest:
+        params["sp"] = "EgIIBQ=="  # YouTube's own "Upload date: this year" filter
+    resp = requests.get("https://www.youtube.com/results", timeout=10, headers=_YT_HEADERS,
+                        params=params)
+    resp.raise_for_status()
+    match = re.search(r"var ytInitialData\s*=\s*(\{.*?\});\s*</script>", resp.text, re.S)
+    if not match:
+        return []
+    found: list[dict] = []
+
+    def walk(node) -> None:
+        if len(found) >= limit:
+            return
+        if isinstance(node, dict):
+            video = node.get("videoRenderer")
+            if isinstance(video, dict) and re.fullmatch(r"[\w-]{11}", str(video.get("videoId", ""))):
+                def text(key):
+                    part = video.get(key) or {}
+                    return part.get("simpleText") or "".join(r.get("text", "") for r in part.get("runs", []))
+                found.append({"title": text("title"),
+                              "content": f"https://www.youtube.com/watch?v={video['videoId']}",
+                              "publisher": "YouTube", "duration": text("lengthText"),
+                              "uploader": text("ownerText"), "published": text("publishedTimeText")})
+                return
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(json.loads(match.group(1)))
+    return found
+
+
 def _videos(query: str, latest: bool) -> list[dict]:
+    try:  # YouTube itself first: most relevant, and not rate-limited like DuckDuckGo
+        found = _youtube(query, latest) or (_youtube(query) if latest else [])
+        if found:
+            return found
+    except Exception as e:
+        print(f"[search] youtube failed: {type(e).__name__}")
     from ddgs import DDGS
     if latest:  # uploads from the last month first
         try:
@@ -151,7 +203,7 @@ def find_video(query: str, latest: bool = False) -> str:
         _keep_link(_clean(v.get("title")), url, note, kind="video", video_id=video_id,
                    image=image if image and str(image).startswith("https://") else None,
                    snippet=_clean(v.get("uploader")))
-        published = str(v.get("published") or "")[:10]
+        published = str(v.get("published") or "")[:16]  # "2026-09-20T10" or "3 weeks ago"
         lines.append(f"- {_clean(v.get('title'))} ({note}; by {_clean(v.get('uploader'))}; "
                      f"published {published or 'unknown'})")
     return "\n".join(lines)[:MAX_RESULT_CHARS]
