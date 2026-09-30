@@ -4,12 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1115">
-<link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Jarvis">
 <title>Jarvis</title>
 <style>
   :root {
@@ -658,9 +653,12 @@ function showStart(visible) {
   if (!a.hidden) a.href = url;
 }
 
-if ("serviceWorker" in navigator) {  // installable app + opens even while Jarvis is off
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+// This page is no longer an installable app (the Jarvis Android app replaced it): remove
+// the old app's service worker and its cached page, if this browser still has them.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
 }
+if (window.caches) caches.keys().then((ks) => ks.forEach((k) => caches.delete(k))).catch(() => {});
 
 // Every status check is one request on the free ngrok plan (20,000/month). So: check
 // every 60 s only while connected and the page is visible, and never while offline

@@ -97,6 +97,15 @@ class Devices:
                           "ORDER BY id")
         return [{**r, "paired": bool(r["paired"])} for r in rows]
 
+    def rotate(self, device_id: int) -> str:
+        """A new token for a paired device, replacing its old one. The app does this right
+        after scanning, so the token that was on the screen (in the QR code) stops working:
+        a photo of the QR code is useless afterwards."""
+        token = secrets.token_urlsafe(32)
+        self._write("UPDATE app_devices SET token_hash = ?, paired = 1 WHERE id = ?",
+                    (token_hash(token), int(device_id)))
+        return token
+
     def revoke(self, device_id: int) -> bool:
         ok = self._write("DELETE FROM app_devices WHERE id = ?", (int(device_id),)) > 0
         if ok:

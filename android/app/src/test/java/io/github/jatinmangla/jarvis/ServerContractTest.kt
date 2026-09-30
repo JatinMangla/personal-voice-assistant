@@ -57,5 +57,11 @@ class ServerContractTest {
         assertEquals(403, refused.code)
         val wrong = runCatching { api("B".repeat(43)).status() }.exceptionOrNull() as ApiException
         assertEquals(ApiException.Kind.Unpaired, wrong.kind)
+
+        // After pairing the app swaps the QR's token; the old one stops working.
+        val fresh = api().post("/api/app/rotate").getString("token")
+        val old = runCatching { api().status() }.exceptionOrNull() as ApiException
+        assertEquals(ApiException.Kind.Unpaired, old.kind)
+        assertEquals(Api.APP_API, api(fresh).status().api)
     }
 }

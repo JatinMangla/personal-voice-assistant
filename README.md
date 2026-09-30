@@ -1,8 +1,8 @@
 # Jarvis: personal voice assistant
 
-A private, Alexa-style voice assistant that you open in the browser on your phone or laptop.
+A private, Alexa-style voice assistant: the **Jarvis app** on your Android phone, or the web page on your laptop.
 Tap the mic, speak (English or Hindi), and it answers out loud. It remembers what you tell it.
-It runs on Kaggle's free GPU, so there is nothing to buy or install on your devices.
+It runs on Kaggle's free GPU, so there is nothing to buy; the phone app is free from GitHub.
 
 - **Private link:** a fixed web address where only *your* Google account can sign in. Everyone else is blocked before they reach the assistant.
 - **Encrypted memory:** everything it remembers is saved to Kaggle already encrypted (AES-256). Without your `MEMORY_KEY`, the saved file is unreadable, even to Kaggle.
@@ -102,7 +102,8 @@ Copy the printed key. **Save it in your password manager.** If you lose it, the 
    - ngrok shows a one-time warning page: tap **Visit Site**.
    - Sign in with Google.
    - Allow the microphone.
-4. On your phone, use **Add to Home Screen** so it opens like an app. Bookmark it on your laptop.
+4. Bookmark the link on your laptop. On your phone, install the **Jarvis app** and pair it
+   (see "Jarvis app on your phone").
 
 ---
 
@@ -142,16 +143,39 @@ If the first start fails with `Missing secret`, open the Jarvis editor once → 
 
 ---
 
-## Install Jarvis as an app (PWA)
+## Jarvis app on your phone (Android)
 
-Open your Jarvis link once while Jarvis is running, and sign in. Then:
-- **Android (Chrome):** menu ⋮ → **Install app** (or "Add to Home screen").
-- **iPhone (Safari):** Share → **Add to Home Screen**.
-- **Laptop (Chrome/Edge):** the install icon in the address bar.
+The phone app replaced the old "install the web page" (PWA) way. It is faster and safer: replies always
+play on the loudspeaker or Bluetooth (never the earpiece), reminders ring on the phone even while
+Jarvis is off, and there is no Google sign-in page each time. It's free and comes from GitHub (no Play
+Store), and **it updates itself**.
 
-It opens full screen with its own icon. When Jarvis is off, the app still opens and shows **Jarvis is off** plus the **▶ Start** button, instead of ngrok's ERR_NGROK_3200 page.
+**Install (once):**
+1. On the phone, open **github.com/JatinMangla/jarvis-app** in Chrome and tap the **download** link
+   (the newest `jarvis-….apk`).
+2. Chrome asks to allow "install unknown apps": **Settings → Allow from this source** → back → **Install**.
+3. Open **Jarvis**. It shows **Scan pairing code**.
 
-**Speaker and Bluetooth:** the mic is switched off the moment you stop talking, so replies play as normal media: through the **loudspeaker**, or your Bluetooth headphones/car in full music quality. While you talk, Bluetooth may briefly switch to its headset microphone, which is normal.
+**Pair it (once; needs Jarvis running):**
+1. On the laptop, open your Jarvis link (Google sign-in as usual) → tap **Phone** (top right) →
+   **Show pairing code**.
+2. In the app, tap **Scan pairing code** and point the phone at the QR code. The page says **Paired**.
+   The code works once and only for 5 minutes.
+3. Allow notifications when asked (for reminders), and the microphone on the first tap of the mic.
+
+**Updates:** the app checks GitHub a few times a day. A new version downloads by itself, is checked
+(checksum and the same signing key), and installs when you leave the app. The very first time, tap
+**Install** on the banner and allow **Install unknown apps → Jarvis** once; after that no taps are needed
+(Android 12+).
+
+**Lost phone or new phone:** on the laptop page → **Phone** → **Revoke** next to it. That phone's key stops
+working at once. In the app, **Menu → Unpair this phone** deletes the key from the phone.
+
+The app has the same controls as the page: tap the mic and speak, **Whisper**, **Clear**, **Good/Bad**,
+link cards (YouTube opens in the YouTube app), and a green **Start** button while Jarvis is off (it opens
+your GitHub Start page).
+
+The laptop page stays as a plain web page (no install), for the laptop and for pairing.
 
 From a laptop you can do the same with `python scripts/start_jarvis.py` (needs `pip install kaggle` and the two values as environment variables).
 
@@ -162,11 +186,11 @@ From a laptop you can do the same with `python scripts/start_jarvis.py` (needs `
 ## Daily use
 
 1. Tap your **Start Jarvis** bookmark → **Run workflow** (see above). Without the button: open the assistant notebook on Kaggle → **Save Version → Save & Run All**, then stop the editor session.
-2. Wait about 1–2 minutes, then open your bookmark. If it says "offline", it is still starting: tap the mic a bit later to reconnect.
+2. Wait about 1–2 minutes, then open the Jarvis app (or your bookmark on the laptop). If it says "Jarvis is off", it is still starting: tap the mic a bit later to reconnect.
 3. **Tap the mic and speak.** It stops listening when you pause, then answers. Tap while it's speaking to interrupt.
 4. When you're done, just leave it. After 10 quiet minutes it saves and shuts down, and the GPU is freed.
 
-The page shows minutes used today and when memory was last saved.
+The app and the page show minutes used today and when memory was last saved.
 
 ### Things you can say
 | Say | What happens |
@@ -184,7 +208,7 @@ The page shows minutes used today and when memory was last saved.
 | Just talk | Memory is automatic. Jarvis decides what's worth keeping: your details, preferences, settings, decisions, what you did and plan, and patterns like what you focus on. Say "forget that …" to remove something. |
 | Just mention things about yourself: "I'm allergic to peanuts", "my daughter Riya is 8" | Jarvis **learns lasting facts by itself**, quietly, with no "remember that" needed. Ask "what do you know about me?" to hear them. Health and diet facts are always in front of it, so months later a recipe with peanuts comes with a warning and a substitute. |
 | "What did we talk about yesterday?" / "What did I decide last month?" / "पिछले हफ्ते मैंने क्या कहा?" | Jarvis understands dates (today, yesterday, last week, last month, "in March", "3 days ago", also in Hindi/Hinglish) and topics ("my decisions", "health", "goals"), and looks only there. For longer periods it uses short **day/week/month summaries** it writes by itself while you're quiet. Names and numbers ("Rohan", "invoice 48213") are found word for word. |
-| "Remind me to call mom at 6" / "Add milk to my to-do list" | Saved as a reminder or to-do. Jarvis can't ring while it's switched off, so **due reminders are said after your first question** and shown as ⏰ notes when you open it. Optional: a free phone notification at the due time (see "Reminder notifications"). |
+| "Remind me to call mom at 6" / "Add milk to my to-do list" | Saved as a reminder or to-do. **The phone app rings at the due time**, even while Jarvis is off (it fetches your reminders whenever it's open while Jarvis runs). Due reminders are also said after your first question and shown as notes. |
 | "I have to pay the electricity bill of 1,200 rupees on the 5th every month" / "I paid the electricity bill" / "How much did I pay for bills?" | Bills are monthly reminders with an amount. Paying one logs it and moves it to next month; Jarvis can total the last 3 months. |
 | "Turn off the living room light" / "Is the washing machine done?" / "Who's at the door?" | Only after you connect Home Assistant (see "Home devices"). Risky actions ask "Should I …?" first and happen only after you say **yes**. |
 | Anything else | Normal conversation. Every chat is remembered and recalled when relevant. |
@@ -196,7 +220,9 @@ The page shows minutes used today and when memory was last saved.
 
 | Threat | Protected? |
 |---|---|
-| Someone finds your link | **Yes.** Only your Google account can sign in (ngrok checks this before anything reaches Kaggle). |
+| Someone finds your link | **Yes.** Only your Google account can sign in (ngrok checks this before anything reaches Kaggle). The phone app skips Google sign-in, so every app request must carry a paired phone's key (256-bit, random); wrong keys are refused and slowed down. |
+| Your phone is lost or stolen | **Yes, once you revoke it.** Laptop page → Phone → Revoke: its key stops working at once. The key sits in the phone's secure hardware storage (Android Keystore) and is never backed up; the app keeps no chat history beyond the screen. A phone's key can't pair new phones. |
+| A fake app update | **Yes.** The app installs only files from the releases repo whose checksum matches and that are signed with the same key as the installed app (Android checks the key too). |
 | Your memory dataset leaks or is made public by mistake | **Yes.** It is only ciphertext; old versions are deleted on every save. |
 | Someone reads the notebook logs | **Yes.** Conversations are never printed. |
 | Internet search leaking personal data | **Yes.** Only the short search words the assistant picks are sent to the search engine; never your memory. Web results are treated as untrusted text and can't trigger any action. Set `WEB_SEARCH = False` in `src/config.py` to turn internet off. |
@@ -204,7 +230,7 @@ The page shows minutes used today and when memory was last saved.
 | "Forget" leaving traces | **Mostly.** Deleted rows are zeroed in the database, copies of the same fact and the summaries of those days are deleted too, the search index is never saved, and old dataset versions are deleted. |
 | A web page tricking Jarvis into switching something on | **Yes.** Device actions run only after *your* spoken "yes" on the very next question, checked by fixed rules, not by the AI. Only devices and actions you listed exist. |
 | The Start button reading your memory | **No, it can't.** It reads only a separate small encrypted file with usage numbers (GPU minutes, link counts), never conversations or facts. |
-| Reminder notifications | **Private by default.** The phone notification only says "You have a reminder"; the reminder text stays in your memory. |
+| Reminder notifications | **Private by default.** On the lock screen the app's notification only says "You have a reminder"; the text shows after unlocking. The reminder list is kept encrypted on the phone. (ntfy, if you use it, only ever says "You have a reminder".) |
 | ngrok seeing your traffic | **On the home PC with Tailscale: protected.** On Kaggle: no (ngrok can technically see it). ngrok decrypts traffic to do the Google sign-in; the Tailscale link is encrypted from your phone to Jarvis, and Jarvis also checks your Tailscale login. |
 | Your Google/Kaggle/GitHub account is hacked | **No.** The key sits in Kaggle Secrets, and the Kaggle token (also in GitHub if you use the Start button) can run notebooks that use it. That's why 2-step verification on all three is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |
@@ -272,9 +298,10 @@ The trained model is stored **encrypted** with your `MEMORY_KEY`, like the memor
 
 To stop using it, remove that input from the assistant notebook, or set `TUNED_MODE = "base"` in `src/config.py`.
 
-## Reminder notifications on your phone (optional, free)
+## Reminder notifications without the phone app (optional, free)
 
-Jarvis runs only when you start it, so it can't ring by itself. With this, the free service
+The Jarvis phone app rings for reminders by itself; you don't need this. Only without the app (e.g.
+an iPhone): Jarvis runs only when you start it, so it can't ring by itself. With this, the free service
 ntfy.sh sends a notification at the due time (up to 3 days ahead; later reminders are
 scheduled the next time you start Jarvis). The notification only says "You have a reminder".
 
@@ -302,7 +329,8 @@ end-to-end encrypted from your phone to the PC, no public address at all, no ngr
    Leave out the `NGROK_…` lines if you want **Tailscale only** (no public link at all).
 4. Start Jarvis (`scripts\run_home.py`). It runs `tailscale serve` by itself; the log shows
    `[ready]  -> https://<pc-name>.<tailnet>.ts.net (Tailscale…)`.
-5. On the phone (Tailscale connected), open that link → **⋮ → Add to Home screen**.
+5. On the laptop (Tailscale connected), open that link → **Phone** → **Show pairing code**, and
+   pair the phone app with it (the phone needs Tailscale connected too).
 
 Note: https certificates are public records, so the PC's `….ts.net` name is visible on the
 internet, but nobody outside your tailnet can connect to it.

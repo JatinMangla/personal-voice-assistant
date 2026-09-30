@@ -378,8 +378,12 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(pairingBusy = true, pairMessage = "Pairing…") }
             try {
                 Api(pairing).hello()
-                store.pairing = pairing
-                _state.update { it.copy(pairing = pairing, pairMessage = null, link = Link.Unknown) }
+                // Swap the token that was on the laptop screen for one that never was: a photo
+                // of the QR code is useless from now on.
+                val fresh = Api(pairing).post("/api/app/rotate").optString("token")
+                val paired = Pairing.withToken(pairing, fresh) ?: throw ApiException(ApiException.Kind.Failed)
+                store.pairing = paired
+                _state.update { it.copy(pairing = paired, pairMessage = null, link = Link.Unknown) }
                 if (visible) reconnect()
             } catch (e: ApiException) {
                 val text = when (e.kind) {

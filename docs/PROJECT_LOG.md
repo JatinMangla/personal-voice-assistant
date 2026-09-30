@@ -380,10 +380,40 @@ run on Kaggle or a device yet.
   assets need a login, so APKs go to a public releases-only repo. Plan and phases:
   [ANDROID_APP_PLAN.md](ANDROID_APP_PLAN.md).
 
+## 2026-10-01: Android app built (phases 0-7), PWA removed
+
+- Owner confirmed all §3 decisions as recommended (Kotlin/Compose; public releases-only repo;
+  plain laptop page + QR pairing with per-device tokens; phone alarms, ntfy kept optional;
+  Start button opens the GitHub page; washer helper stays in Termux).
+- Phase 0: public repo `JatinMangla/jarvis-app` created; signing key (PKCS12, RSA 4096, 30 y,
+  cert SHA-256 `d9c29311…f995`) made with a portable JDK on the laptop; secrets
+  `ANDROID_KEYSTORE_B64/_PASSWORD`, `ANDROID_KEY_ALIAS/_PASSWORD`, `APP_DEPLOY_KEY`.
+  **Change from the plan:** no fine-grained PAT and no GitHub Releases. CI publishes with an
+  SSH **deploy key** that can write to `jarvis-app` only (narrower, no expiry, no owner
+  clicks), as one force-pushed commit holding `apk/jarvis-<ver>.apk`, `SHA256SUMS`,
+  `latest.json` (the app reads it from raw.githubusercontent.com). `app-v0.0.1` published.
+- Local toolchain (no admin): JDK 17, Gradle, Android SDK in
+  `%LOCALAPPDATA%\Programs\android-dev`, so the app compiles and its tests run on the laptop.
+- Phase 1 (server): `devices.py` (hashed 256-bit tokens, 5-min pairing, revoke, lockout for
+  wrong tokens only), app header rule in the ngrok policy, page-only pairing endpoints,
+  `api` version 1, pairing QR on the page (vendored qrcode-generator, npm-integrity checked).
+- Phases 2-6 (app): pairing via ZXing (no Play services / ML Kit, which has telemetry),
+  Keystore-encrypted storage, OGG/Opus recorder with the page's silence rule, ExoPlayer on
+  media audio, NDJSON streaming, link cards, ratings, limits, goodbye, local reminder alarms
+  (server sends a reminders fingerprint so the app syncs only on change), self-update with
+  checksum + signer checks and USER_ACTION_NOT_REQUIRED.
+- A JVM contract test drives the app's real HTTP client against the real `app.py`
+  (`scripts/app_test_server.py`): pairing, status, streamed turn, links, rating, reminders,
+  403/401 all pass. Not yet run on a phone.
+- Phase 7: PWA removed (manifest, icons, install tags); `sw.js` is now a kill switch that
+  deletes the old cache and unregisters itself; the page unregisters old workers.
+
 ## Open items / next steps
+- The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
+  FUTURE_PLANS §0a (the app checklist).
 - Next run: the checks in FUTURE_PLANS.md section 0 (old list + the new features).
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.
-- On a real phone, confirm: loudspeaker/Bluetooth playback, PWA install and offline Start button,
+- On a real phone (app), confirm: loudspeaker/Bluetooth playback, offline Start button,
   YouTube app deep link, price cards.
 - On a laptop, try screen sharing.
 - Optional: rebuild the model cache so it includes `ddgs`.

@@ -26,6 +26,9 @@ data class Pairing(val url: String, val token: String) {
             return of(o.optString("url"), o.optString("token"))
         }
 
+        /** The same server with the fresh token from /api/app/rotate (checked like the QR's). */
+        fun withToken(pairing: Pairing, token: String): Pairing? = of(pairing.url, token)
+
         fun fromJson(text: String?): Pairing? = try {
             val o = JSONObject(text ?: return null)
             of(o.optString("url"), o.optString("token"))

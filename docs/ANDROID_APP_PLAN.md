@@ -7,8 +7,27 @@ architecture, gotchas), then this file. Written 2026-09-30 from the owner's requ
 > build the app, put it on GitHub, and that also handles updates. No Google Play Console. It
 > will be fast and secure."
 
-Nothing of this is built yet. The owner's priorities still apply: **1) security/privacy,
-2) speed, 3) ₹0**. Give them click-by-click steps for anything they do (Appendix A).
+The owner's priorities still apply: **1) security/privacy, 2) speed, 3) ₹0**. Give them
+click-by-click steps for anything they do (Appendix A).
+
+## Status (2026-10-01): phases 0-7 built, not yet run on a phone
+
+- §3 decisions confirmed by the owner as recommended (D1-D7).
+- **Changed from §6:** releases are published with an SSH **deploy key** (`APP_DEPLOY_KEY`,
+  write access to `jarvis-app` only) instead of a fine-grained PAT, and not as GitHub
+  Releases: each release force-pushes one commit with `apk/jarvis-<ver>.apk`, `SHA256SUMS`
+  and `latest.json`; the app reads `raw.githubusercontent.com/JatinMangla/jarvis-app/main/latest.json`.
+  Narrower permission, no token expiry, no owner steps (A2 is not needed). `versionCode` =
+  the release workflow's run number.
+- Signing key: `%LOCALAPPDATA%\jarvis-keys\jarvis-release.p12` on the laptop (+ password file,
+  to move into the owner's password manager), cert SHA-256
+  `d9c29311a095569ad60a0c896787bdb748a6a52029fab3baa97cc78fde12f995` (pinned in the release
+  workflow). A3 is done.
+- QR scanning uses ZXing (`zxing-android-embedded`), not ML Kit: ML Kit bundles Google's
+  data-transport telemetry (§5 "no trackers").
+- Build locally: `android/gradlew` with the portable JDK 17 + SDK in
+  `%LOCALAPPDATA%\Programs\android-dev` (see CLAUDE.md, Developing).
+- What to test on the phone: FUTURE_PLANS §0a.
 
 ---
 

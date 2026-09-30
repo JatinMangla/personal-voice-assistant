@@ -6,12 +6,13 @@ the user-facing guide is [README.md](README.md); the original plan review is [do
 **what to do next** is in [docs/FUTURE_PLANS.md](docs/FUTURE_PLANS.md);
 memory retrieval research and the chosen direction (hybrid SQLite: FTS5 + vectors + RRF +
 date/category filters; later time-summary tree + split storage) is [docs/MEMORY_RESEARCH.md](docs/MEMORY_RESEARCH.md);
-**the planned Android app that replaces the PWA** (Kotlin, GitHub releases, self-update, device
-tokens) is [docs/ANDROID_APP_PLAN.md](docs/ANDROID_APP_PLAN.md).
+**the Android app that replaced the PWA** (Kotlin, `android/`, releases via the public repo
+`JatinMangla/jarvis-app`, self-update, device tokens) is [docs/ANDROID_APP_PLAN.md](docs/ANDROID_APP_PLAN.md).
 
 ## What this is
 A private, Alexa-style voice assistant that the owner (GitHub `JatinMangla`, Kaggle
-`jatinmangla123`, in India) opens as a web app / PWA on phone and laptop. It runs on
+`jatinmangla123`, in India) uses through the **Jarvis Android app** on the phone and a plain
+web page on the laptop (the PWA was removed 2026-10-01). It runs on
 **Kaggle's free GPU** (T4 x2) and is reached through a fixed **ngrok** address behind **Google
 sign-in**. English + Hindi, voice in and voice out, with long-term encrypted memory, web
 search, link cards, price search, screen snapshots, and optional style fine-tuning.
@@ -48,8 +49,13 @@ search, link cards, price search, screen snapshots, and optional style fine-tuni
    a different value makes Ollama reload the whole model (~40 s).
 
 ## Architecture (one spoken turn)
+The Android app (`android/`) does the same turn natively: MediaRecorder OGG/Opus 16 kHz,
+silence stop (`SilenceDetector`, peak levels), `POST /api/turn` with `X-Jarvis-App: 1` +
+`Authorization: Bearer <device token>`, NDJSON read by OkHttp, sentences played by ExoPlayer as
+media audio. ngrok lets `X-Jarvis-App` requests skip Google sign-in; `app.py` then requires a
+paired device token (`devices.py`). The page draws the pairing QR (Phone button).
 ```
-phone/laptop browser (src/static/index.html, PWA + service worker sw.js)
+laptop browser (src/static/index.html, plain page; sw.js only removes the old PWA)
   tap mic -> record (auto-stop on 1.2 s silence) -> mic released (so replies use the
   loudspeaker / Bluetooth media, not the earpiece)
   [optional: POST /api/screen with one JPEG snapshot of the shared screen]
@@ -74,7 +80,7 @@ ngrok (fixed domain, Google OAuth allowlist)  ->  FastAPI on Kaggle (src/app.py)
               + learn.reflect(): every few minutes while idle and at session end, stores
               "pattern" facts (focus, recurring interests, habits, how they like help)
   UI          fixed header top, chat scrolls, fixed bottom bar [🤫 Whisper] (mic) [▶ Start];
-              🖥 screen snapshot (desktop only), Clear (UI only), Good/Bad text buttons under the
+              🖥 screen snapshot (desktop only), Phone (pairing QR + Revoke), Clear (UI only), Good/Bad text buttons under the
               LATEST reply only (owner: no emoji in the conversation; `app.no_emoji` strips
               any the model writes, before showing, speaking and saving). The owner asked for
               NO memory button: memory is automatic (/api/facts endpoints still exist, unused)
@@ -112,10 +118,12 @@ int8), and `local_voice.py`: "Hey Jarvis" (openWakeWord) on the PC's mic and spe
 | `src/stt.py`, `src/tts.py`, `src/tunnel.py` | Speech in/out; ngrok with OAuth traffic policy. |
 | `src/tailnet.py` | Tailscale: on Kaggle downloads the static binaries, `tailscaled --tun=userspace-networking`, `tailscale up --auth-key=TS_AUTHKEY --hostname=jarvis`, `tailscale serve --bg --https=443 http://127.0.0.1:8001`. The node's state dir (identity + cert) is saved as `tailscale.tar.enc` in the memory dataset (`MemoryStore.extras`) so every run is the same device/URL (Let's Encrypt ~5 certs/week per name). The app's second port 8001 is Tailscale-only: middleware requires `Tailscale-User-Login` in ALLOWED_EMAIL/TAILSCALE_USERS, and its traffic isn't counted against ngrok. Started in a background thread after the budget check (parallel to model loading). |
 | `src/finetune_data.py` | Phase 5 training data (👍 turns only, private-looking text excluded). |
-| `src/static/` | `index.html` (whole UI), `login.html`, `sw.js`, `manifest.json`, icons. |
+| `src/static/` | `index.html` (laptop UI + Phone pairing dialog), `login.html`, `qrcode.js` (vendored qrcode-generator 1.4.4, MIT), `sw.js` (kill switch: removes the old PWA's worker/cache; delete ~2027), `icon-192.png` (favicon). |
+| `src/devices.py` | Paired phones: 256-bit token per device, only SHA-256 stored (table `app_devices` in the encrypted memory), unused pairing codes expire in 5 min, revoke, 5 wrong tokens/15 min -> 429 for wrong tokens only. `app.py`: `X-Jarvis-App` requests need a valid token; `/api/app/pair`, `/api/app/devices(/revoke)` are page-only (403 with an app token); `/api/app/hello`, `/api/app/rotate` (the app swaps the QR's token for a fresh one right after pairing, so a photo of the QR is useless), `/api/app/reminders`; status has `api` (APP contract version, now 1) and `reminders` (fingerprint; also in the `done` event). |
+| `android/` | Kotlin + Compose app `io.github.jatinmangla.jarvis` (minSdk 29, target 35; AGP 8.7.3, Kotlin 2.1.0, Gradle 8.11.1). `net/` (Api: OkHttp, NDJSON Flow; Pairing QR parsing; Status), `audio/` (Recorder OGG/Opus, SilenceDetector, SpeechPlayer = ExoPlayer from memory, USAGE_MEDIA), `reminders/` (exact alarms -> notifications, reschedule on boot/update/time change), `update/` (latest.json -> download -> size/SHA-256/same-signer -> PackageInstaller, silent on Android 12+), `SecureStore` (Keystore AES-GCM), `JarvisViewModel` (the voice loop), `ui/`. Tests: `LogicTest.kt` (JVM) and `ServerContractTest.kt` (the app's client vs real `app.py`, only with `JARVIS_IT_URL`/`JARVIS_IT_TOKEN`; server: `scripts/app_test_server.py`). QR via ZXing (not ML Kit: telemetry). |
 | `notebooks/` | `assistant.ipynb` (Jarvis), `build_model_cache.ipynb`, `finetune.ipynb` (generated by `scripts/make_finetune_notebook.py`). |
-| `scripts/` | `start_jarvis.py` (Start button; refuses before pushing if `usage.json.enc` says a limit is used up), `run_home.py` (home PC), `kaggle_log.py` (status + log of the last Kaggle run), `find_samsung.py` (finds Samsung appliances on the home Wi-Fi; never run it on the office network), `upload_code.py` (auto-upload), `make_code_zip.py`, `make_key.py`, `make_icons.py`. |
-| `.github/workflows/` | `start-jarvis.yml` (manual button), `update-kaggle-code.yml` (on push to `src/`), `jarvis-log.yml` ("Jarvis log" button: read the last run's log without opening Kaggle). From this laptop: `gh workflow run "Start Jarvis"` / `gh workflow run "Jarvis log"` (portable gh, see memory). |
+| `scripts/` | `start_jarvis.py` (Start button; refuses before pushing if `usage.json.enc` says a limit is used up), `run_home.py` (home PC), `kaggle_log.py` (status + log of the last Kaggle run), `find_samsung.py` (finds Samsung appliances on the home Wi-Fi; never run it on the office network), `upload_code.py` (auto-upload), `make_code_zip.py`, `make_key.py`, `make_icons.py` (favicon), `app_test_server.py` (real `app.py` with fakes on 127.0.0.1:8765 for the app's contract test). |
+| `.github/workflows/` | `start-jarvis.yml` (manual button), `update-kaggle-code.yml` (on push to `src/`), `jarvis-log.yml` ("Jarvis log" button: read the last run's log without opening Kaggle), `android-ci.yml` (tests + debug build on `android/` changes), `android-release.yml` (tag `app-v1.2.3`: signed build, signer fingerprint check, publish to `jarvis-app`). From this laptop: `gh workflow run "Start Jarvis"` / `gh workflow run "Jarvis log"` (portable gh, see memory). |
 
 ## How it is deployed
 - **Code:** `git push` to `main` -> GitHub Action zips `src/` -> new version of the Kaggle
@@ -130,14 +138,31 @@ int8), and `local_voice.py`: "Hey Jarvis" (openWakeWord) on the PC's mic and spe
   optional). Button runs get them via a one-time-key encrypted
   private dataset `jarvis-secrets` + `RUN_KEY` injected into the pushed notebook.
 - ngrok domain: `volley-gnarly-constable.ngrok-free.dev`. GitHub repo: `JatinMangla/personal-voice-assistant` (private).
+- **Android app:** `git tag app-v0.2.0 && git push origin app-v0.2.0` -> "Android release" builds,
+  signs (secrets `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`=jarvis,
+  `ANDROID_KEY_PASSWORD`), checks the cert SHA-256 `d9c29311…f995`, and force-pushes one commit
+  to the PUBLIC `JatinMangla/jarvis-app` (`apk/jarvis-<ver>.apk`, `SHA256SUMS`, `latest.json`)
+  with the SSH deploy key `APP_DEPLOY_KEY` (write access to that repo only). `versionCode` = the
+  workflow run number. Phones read `raw.githubusercontent.com/JatinMangla/jarvis-app/main/latest.json`
+  (every 6 h / Menu -> Check for updates) and install when the app is left. The keystore
+  lives only in the GitHub secret + `%LOCALAPPDATA%\jarvis-keys\` on the laptop (+ the owner's
+  password manager): losing it = uninstall/reinstall (memory is on the server, nothing lost).
+  Bump `Api.APP_API` and `app.API_VERSION` together when the server contract changes.
 
 ## Developing
 ```
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements-dev.txt   (+ ddgs for search tests)
-.venv\Scripts\python -m pytest tests          # ~338 tests, no GPU/network needed
+.venv\Scripts\python -m pytest tests          # ~356 tests, no GPU/network needed
 node --check src/static/sw.js                  # and the <script> of index.html
 ```
+Android (no admin needed; portable JDK 17 + SDK already in `%LOCALAPPDATA%\Programs\android-dev`,
+`android/local.properties` points `sdk.dir` there and is git-ignored):
+```
+cd android; $env:JAVA_HOME="$env:LOCALAPPDATA\Programs\android-dev\jdk17"
+.\gradlew testDebugUnitTest assembleDebug lintDebug
+```
+Nothing can run on a phone from here; the owner installs from `jarvis-app` and reports back.
 - Nothing GPU-related can run locally; the owner runs Kaggle and pastes logs. Make logs
   diagnostic (step timings, device, speed) without leaking content.
 - Commit messages end with `Co-Authored-By: Claude ...`; push to `main` deploys code.
@@ -232,11 +257,24 @@ node --check src/static/sw.js                  # and the <script> of index.html
     create` answers "already exists", `MemoryStore` sets `blocked` and never saves (an empty
     memory must never replace the real one).
 
-## Status (2026-09-30): read this first
-- **Next big project (owner's request): an Android app instead of the PWA**, released and
-  self-updated through GitHub (no Play Console). Plan, decisions to confirm, phases, research
-  and the owner's click-by-click steps: [docs/ANDROID_APP_PLAN.md](docs/ANDROID_APP_PLAN.md).
-  Not started.
+28. (2026-10-01) Files committed from Windows lose the executable bit: `android/gradlew` needed
+    `git update-index --chmod=+x` or CI fails with "permission denied".
+29. ngrok CEL: request header names are lowercase, `req.headers` is a map of lists, so the
+    app rule is `'x-jarvis-app' in req.headers` (`tunnel.traffic_policy(app_header=True)`).
+    Presence of the header is also what makes `app.py` demand the token: keep both rules
+    identical, or an app-header request could slip past both checks.
+
+## Status (2026-10-01): read this first
+- **Android app built (plan phases 0-7), PWA removed.** Not yet run on a phone: next job is
+  FUTURE_PLANS §0a with the owner (install from github.com/JatinMangla/jarvis-app, pair via
+  the laptop page's Phone button). Release `app-v0.1.0` is the first full app.
+- Owner to-do: move `%LOCALAPPDATA%\jarvis-keys\` (signing key + password file) into the
+  password manager and delete the password file; optional A5 (free developer-verification
+  account before 2027).
+- Phase 8 (Start from the app, widget, washer helper in the app, wake word) = owner's choice.
+
+## Status (2026-09-30)
+- Android app planned ([docs/ANDROID_APP_PLAN.md](docs/ANDROID_APP_PLAN.md)); built 2026-10-01.
 - **Works on Kaggle (2026-09-29, version 28):** start-up with all new code reached the ngrok
   link (Google sign-in). Nobody has used/tested the new features on the phone yet: that is
   FUTURE_PLANS §0.

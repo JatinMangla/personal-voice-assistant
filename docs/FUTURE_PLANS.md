@@ -19,12 +19,29 @@ run's log yourself: `gh workflow run "Jarvis log"` then `gh run view <id> --log`
 
 ---
 
-## Next big project: the Android app (replaces the PWA)
+## The Android app (built 2026-10-01, replaces the PWA)
 
-The owner wants a native phone app, released and updated through GitHub, and the PWA removed.
-Full plan: [ANDROID_APP_PLAN.md](ANDROID_APP_PLAN.md). Start with its §3 decisions (confirm
-them with the owner) and phase 0. Do §0 below whenever the owner runs Jarvis, since the app
-builds on the same server features.
+Phases 0-7 of [ANDROID_APP_PLAN.md](ANDROID_APP_PLAN.md) are built; nothing has run on a phone
+yet. Next: §0a with the owner. Phase 8 (Start from the app, widget/quick tile, washer helper in
+the app, wake word) is the owner's choice.
+
+## 0a. The app on a real phone
+
+| Check | Expected |
+|---|---|
+| Install | github.com/JatinMangla/jarvis-app → download → install (allow unknown apps once) |
+| Pair | Laptop page → Phone → Show pairing code → app Scan → page says "Paired"; log `[devices] a phone finished pairing` |
+| Voice | tap mic, speak, pause → reply on the **loudspeaker** (and Bluetooth when connected); first audio ≤ 3 s like the page; Whisper mode hears soft speech |
+| Interrupt | tap while speaking stops it and listens |
+| Cards | a search shows cards; a YouTube card opens the YouTube app |
+| Reminders | "remind me in 10 minutes to …", close Jarvis → notification on time (lock screen shows only "You have a reminder") |
+| Goodbye / off | after 10 idle min the goodbye plays (app open); then **Start** opens the GitHub page |
+| Revoke | laptop Revoke → app shows "no longer paired" + Pair again |
+| Update | tag `app-v0.1.1` → within 6 h (or Menu → Check for updates) the banner, first Install asks once, later updates install silently when leaving the app |
+| ngrok policy | the `X-Jarvis-App` rule works on the real ngrok (CEL `'x-jarvis-app' in req.headers`); a browser without Google sign-in still gets the login |
+
+If audio levels are off (stops too early/late), tune `SilenceDetector` thresholds (peak levels
+from `getMaxAmplitude`, not RMS).
 
 ## 0. First: confirm on Kaggle and on a real device
 

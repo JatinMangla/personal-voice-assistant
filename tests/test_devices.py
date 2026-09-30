@@ -137,6 +137,18 @@ def test_app_token_cannot_manage_devices(web):
     assert len(a.devices.list()) == 1
 
 
+def test_app_swaps_the_qr_token_for_a_fresh_one(web):
+    a, c = web()
+    shown = c.post("/api/app/pair", json={}).json()["token"]
+    assert c.get("/api/app/hello", headers=bearer(shown)).status_code == 200
+    fresh = c.post("/api/app/rotate", headers=bearer(shown)).json()["token"]
+    assert fresh != shown and len(fresh) >= 43
+    assert c.get("/api/status", headers=bearer(shown)).status_code == 401  # a photo of the QR is useless
+    assert c.get("/api/status", headers=bearer(fresh)).status_code == 200
+    assert len(a.devices.list()) == 1 and a.devices.list()[0]["paired"]
+    assert c.post("/api/app/rotate").status_code == 403  # the page has no device to rotate
+
+
 def test_page_lists_and_revokes_devices(web):
     a, c = web()
     token = c.post("/api/app/pair", json={"name": "Pixel"}).json()["token"]

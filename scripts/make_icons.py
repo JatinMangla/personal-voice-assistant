@@ -54,6 +54,6 @@ def png(size: int) -> bytes:
 
 
 if __name__ == "__main__":
-    for name, size in [("icon-192.png", 192), ("icon-512.png", 512), ("apple-touch-icon.png", 180)]:
+    for name, size in [("icon-192.png", 192)]:  # the page's favicon (no installable PWA any more)
         (OUT / name).write_bytes(png(size))
         print("wrote", OUT / name)

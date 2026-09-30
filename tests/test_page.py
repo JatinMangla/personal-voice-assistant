@@ -1,6 +1,5 @@
-"""Installable app (PWA) files and the automatic code upload."""
+"""The plain laptop page (no PWA any more) and the automatic code upload."""
 import importlib.util
-import json
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,25 +37,27 @@ def client(embedder, gate=None, start_url=None):
     return TestClient(app_module.create_app(a, gate))
 
 
-def test_app_files_are_served_with_right_types(embedder):
+def test_page_is_plain_not_an_installable_app(embedder):
+    html = (ROOT / "src" / "static" / "index.html").read_text(encoding="utf-8")
+    assert 'rel="manifest"' not in html and "apple-touch-icon" not in html
+    assert "serviceWorker.register" not in html and "unregister()" in html
     c = client(embedder)
-    assert c.get("/sw.js").headers["content-type"].startswith("text/javascript")
-    assert c.get("/manifest.json").headers["content-type"].startswith("application/manifest+json")
-    for icon in ("icon-192.png", "icon-512.png", "apple-touch-icon.png"):
-        r = c.get(f"/{icon}")
-        assert r.status_code == 200 and r.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert c.get("/manifest.json").status_code == 404
+    assert c.get("/icon-512.png").status_code == 404
+    assert c.get("/").status_code == 200
 
 
-def test_manifest_is_installable():
-    m = json.loads((ROOT / "src" / "static" / "manifest.json").read_text())
-    assert m["display"] == "standalone" and m["start_url"]
-    sizes = {i["sizes"] for i in m["icons"]}
-    assert {"192x192", "512x512"} <= sizes
-    for i in m["icons"]:
-        assert (ROOT / "src" / "static" / i["src"]).exists()
+def test_old_service_worker_is_replaced_by_one_that_removes_itself(embedder):
+    c = client(embedder)
+    r = c.get("/sw.js")
+    assert r.headers["content-type"].startswith("text/javascript")
+    assert "registration.unregister()" in r.text and "caches.delete" in r.text
+    assert "fetch" not in r.text  # it never serves anything from a cache any more
+    icon = c.get("/icon-192.png")
+    assert icon.status_code == 200 and icon.content[:8].startswith(b"\x89PNG")
 
 
-def test_app_files_open_but_data_locked_behind_password(embedder):
+def test_favicon_and_sw_open_but_data_locked_behind_password(embedder):
     c = client(embedder, gate=PasswordGate("pw", b"k" * 32))
     assert c.get("/sw.js").status_code == 200
     assert c.get("/icon-192.png").status_code == 200
@@ -72,7 +73,7 @@ def test_code_zip_has_everything_with_linux_paths(tmp_path):
     out = load_script("make_code_zip").build(tmp_path / "code.zip")
     names = zipfile.ZipFile(out).namelist()
     for needed in ("src/main.py", "src/static/index.html", "src/static/sw.js",
-                   "src/static/icon-512.png", "src/learn.py"):
+                   "src/static/qrcode.js", "src/devices.py", "src/learn.py"):
         assert needed in names
     assert not any("\\" in n or "__pycache__" in n for n in names)
 

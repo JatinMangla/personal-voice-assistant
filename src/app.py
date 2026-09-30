@@ -524,11 +524,9 @@ class PasswordGate:
 def create_app(assistant: Assistant, gate: PasswordGate | None = None,
                tailnet_users: set[str] | None = None) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
-    # App files with no personal data, readable before the password page (fallback mode).
-    app_files = {"/manifest.json": "application/manifest+json",
-                 "/sw.js": "text/javascript",
-                 "/icon-192.png": "image/png", "/icon-512.png": "image/png",
-                 "/apple-touch-icon.png": "image/png"}
+    # Files with no personal data, readable before the password page (fallback mode): the
+    # favicon, and sw.js, which only removes the old installable web app (PWA) from browsers.
+    app_files = {"/sw.js": "text/javascript", "/icon-192.png": "image/png"}
     open_paths = {"/login", *app_files}
 
     allowed_tailnet = tailnet.allowed_logins() if tailnet_users is None else tailnet_users
@@ -546,6 +544,7 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None,
             if device is None:
                 return JSONResponse({"error": "too many attempts" if locked else "not paired"},
                                     status_code=429 if locked else 401)
+            request.state.device_id = device["id"]
         elif via_tailnet:
             # `tailscale serve` sets this header and removes any copy the browser sent.
             login = request.headers.get("tailscale-user-login", "").strip().lower()
@@ -622,6 +621,14 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None,
             return {"ok": assistant.devices.revoke(int(body["id"]))}
         except (KeyError, TypeError, ValueError):
             return JSONResponse({"error": "bad id"}, status_code=400)
+
+    @app.post("/api/app/rotate")
+    def rotate_token(request: Request):
+        """The app swaps the token from the QR code for one that was never on a screen."""
+        device_id = getattr(request.state, "device_id", None)
+        if device_id is None:
+            return JSONResponse({"error": "app only"}, status_code=403)
+        return {"token": assistant.devices.rotate(device_id)}
 
     @app.get("/api/app/hello")
     def app_hello():
