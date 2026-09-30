@@ -78,12 +78,13 @@ interface ChatActions {
     fun checkUpdates()
     fun installUpdate()
     fun unpair()
+    fun screen()
 }
 
 @Composable
-fun ChatScreen(state: UiState, actions: ChatActions) {
+fun ChatScreen(state: UiState, sharing: Boolean, actions: ChatActions) {
     Column(Modifier.safeDrawingPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
-        Header(state, actions)
+        Header(state, sharing, actions)
         state.update?.let { UpdateBanner(it.info.versionName, it.ready, it.error, actions) }
         state.status?.let { Limits(it) }
         HorizontalDivider(Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.outline)
@@ -94,7 +95,7 @@ fun ChatScreen(state: UiState, actions: ChatActions) {
 }
 
 @Composable
-private fun Header(state: UiState, actions: ChatActions) {
+private fun Header(state: UiState, sharing: Boolean, actions: ChatActions) {
     var menu by remember { mutableStateOf(false) }
     var confirmUnpair by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -112,6 +113,10 @@ private fun Header(state: UiState, actions: ChatActions) {
                 saved, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 color = if (s?.saveOk == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        // Screen sharing: Jarvis sees the app you're in when you tap its bubble there.
+        TextButton(onClick = actions::screen) {
+            Text(if (sharing) "Stop screen" else "Screen", color = if (sharing) Listen else MaterialTheme.colorScheme.primary)
         }
         TextButton(onClick = actions::clear) { Text("Clear") }
         Box {

@@ -78,13 +78,16 @@ class NdjsonTest {
     fun linkCardsKeepOnlyWebLinksAndValidVideoIds() {
         val links = JSONArray()
             .put(JSONObject().put("url", "https://youtube.com/watch?v=dQw4w9WgXcQ").put("title", "Song")
-                .put("kind", "video").put("video_id", "dQw4w9WgXcQ").put("image", "https://i.ytimg.com/x.jpg"))
+                .put("kind", "video").put("video_id", "dQw4w9WgXcQ").put("image", "https://i.ytimg.com/x.jpg")
+                .put("play", true))
             .put(JSONObject().put("url", "javascript:alert(1)").put("title", "bad"))
             .put(JSONObject().put("url", "https://shop.in/p").put("title", "Kettle").put("kind", "product")
                 .put("price", "₹999").put("image", "http://insecure/img.png").put("video_id", "../../etc"))
         val cards = (Ndjson.parse(JSONObject().put("type", "links").put("links", links).toString()) as TurnEvent.Links).links
         assertEquals(2, cards.size)
         assertTrue(cards[0].isVideo)
+        assertTrue(cards[0].play)
+        assertFalse(cards[1].play)
         assertEquals("₹999", cards[1].price)
         assertNull(cards[1].image) // only https images
         assertNull(cards[1].videoId)

@@ -16,6 +16,8 @@ data class LinkCard(
     val price: String?,
     val kind: String,
     val videoId: String?,
+    /** The user asked to PLAY it: the app opens this video in YouTube after the reply. */
+    val play: Boolean = false,
 ) {
     val isVideo: Boolean get() = kind == "video" && videoId != null
 }
@@ -79,6 +81,7 @@ object Ndjson {
                 price = l.optNullableString("price"),
                 kind = l.optString("kind", "web"),
                 videoId = l.optNullableString("video_id")?.takeIf { VIDEO_ID.matches(it) },
+                play = l.optBoolean("play", false),
             )
         }
         return out

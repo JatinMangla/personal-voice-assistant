@@ -412,6 +412,13 @@ run on Kaggle or a device yet.
   sideload install, QR scan, the ngrok `X-Jarvis-App` rule on the real ngrok, token auth and
   the token rotation on a real phone.
 
+- 2026-10-01 (owner feedback): "play an Arijit song" -> Jarvis said it was playing, but no
+  cards; "play music on YouTube" did nothing. Cause: the search tools run only if the model
+  calls them, and Qwen sometimes answers without calling. Fix: `quick_search.py` detects
+  song/video/price/suggestion requests by rules and searches before the model answers (cards
+  arrive first); in the app a "play" request opens the video in YouTube after the reply.
+  Also: screen sharing in the app (MediaProjection + bubble), app 0.2.0.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

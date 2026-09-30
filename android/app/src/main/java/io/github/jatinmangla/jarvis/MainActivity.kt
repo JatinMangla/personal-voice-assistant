@@ -18,8 +18,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import android.media.projection.MediaProjectionManager
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import io.github.jatinmangla.jarvis.screen.ScreenShare
+import io.github.jatinmangla.jarvis.screen.ScreenShareService
+import kotlinx.coroutines.launch
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.jatinmangla.jarvis.ui.ChatActions
@@ -37,24 +44,71 @@ class MainActivity : ComponentActivity(), ChatActions {
     private val scan = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let { vm.pair(it) }
     }
+    private val listenPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.listenNow()
+    }
+    private val screenConsent = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val data = result.data
+        if (result.resultCode == RESULT_OK && data != null) {
+            ScreenShare.start(this, result.resultCode, data)
+            vm.addNote("Screen sharing is on. Open any app and tap the round Jarvis bubble to ask about " +
+                "that screen. Jarvis sees one snapshot per question; nothing is recorded or saved.")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { vm.openVideo.collect { openVideo(it) } }
+        }
         setContent {
             JarvisTheme {
                 Surface(Modifier.fillMaxSize()) {
                     val state by vm.state.collectAsStateWithLifecycle()
+                    val sharing by ScreenShare.active.collectAsStateWithLifecycle()
                     val paired = state.pairing != null
                     LaunchedEffect(paired) { if (paired) askForNotifications() }
                     if (state.pairing == null) {
                         PairScreen(state.pairMessage, state.pairingBusy, ::startScan)
                     } else {
-                        ChatScreen(state, this)
+                        ChatScreen(state, sharing, this)
                     }
                 }
             }
         }
+        handleListen(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleListen(intent)
+    }
+
+    /** Opened by the screen-sharing bubble: listen at once. */
+    private fun handleListen(intent: Intent?) {
+        if (intent?.getBooleanExtra(ScreenShareService.EXTRA_LISTEN, false) != true) return
+        intent.removeExtra(ScreenShareService.EXTRA_LISTEN)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            vm.listenNow()
+        } else {
+            listenPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    override fun screen() {
+        if (ScreenShare.active.value) {
+            ScreenShare.stop(this)
+            vm.addNote("Screen sharing is off.")
+            return
+        }
+        if (!ScreenShare.overlayAllowed(this)) {
+            // Once: Settings -> Display over other apps -> Jarvis -> Allow (for the bubble).
+            vm.addNote("Allow Jarvis to show its bubble over other apps (once), then tap Screen again.")
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+        screenConsent.launch(getSystemService(MediaProjectionManager::class.java).createScreenCaptureIntent())
     }
 
     override fun onStart() {

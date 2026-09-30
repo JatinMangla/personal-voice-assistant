@@ -103,8 +103,12 @@ def web_search(query: str) -> str:
             results = source(query)
             if results:
                 for r in results[:3]:
+                    video_id = pages.youtube_id(str(r.get("href") or ""))
+                    extra = ({"kind": "video", "video_id": video_id,
+                              "image": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"}
+                             if video_id else {})  # a YouTube result gets a Play card too
                     _keep_link(_clean(r.get("title")), r.get("href"),
-                               snippet=_clean(r.get("body"))[:160])
+                               snippet=_clean(r.get("body"))[:160], **extra)
                 return format_results(query, results)
         except Exception as e:
             print(f"[search] {source.__name__.strip('_')} failed: {type(e).__name__}")

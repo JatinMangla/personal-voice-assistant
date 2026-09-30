@@ -20,6 +20,7 @@ import devices as devices_module
 import digest
 import learn
 import llm
+import quick_search
 import tailnet
 import tools
 import websearch
@@ -154,10 +155,11 @@ class Assistant:
         self.stopped = threading.Event()
 
     # --- one spoken turn -------------------------------------------------------
-    def handle_turn(self, audio: bytes, quiet: bool = False, mime: str = ""):
+    def handle_turn(self, audio: bytes, quiet: bool = False, mime: str = "", app: bool = False):
         """Generator of NDJSON events: transcript, then sentence text + audio pairs.
         quiet = Whisper mode (soft voice): boost the audio and listen more sensitively.
-        mime = the recording format the browser says it sent (for the log only)."""
+        mime = the recording format the browser says it sent (for the log only).
+        app = asked from the Android app (it can open YouTube by itself; the page can't)."""
         t0 = time.time()
         first_audio = None
         try:
@@ -208,8 +210,16 @@ class Assistant:
                 model = self.picker.pick()
                 websearch.take_links(enrich=False)  # start this turn with no links
                 screen = self._take_screen()
+                # Songs/videos/prices: search first (by rules), show the cards at once.
+                searched = self._quick_search(text, app)
+                if searched:
+                    links = websearch.take_links()
+                    if searched[0].play and app and links and links[0].get("kind") == "video":
+                        links[0]["play"] = True  # the app opens it in YouTube by itself
+                    if links:
+                        yield _line(type="links", links=links)
                 reply_parts = []
-                for sentence in self._llm_sentences(text, lang, now, model, screen):
+                for sentence in self._llm_sentences(text, lang, now, model, screen, searched):
                     sentence = no_emoji(sentence)
                     if not sentence:
                         continue
@@ -258,14 +268,36 @@ class Assistant:
             return base64.b64encode(pending[0]).decode()
         return None
 
+    def _quick_search(self, text: str, app: bool = False) -> tuple["quick_search.Search", str] | None:
+        """Run the song/video/price search the request clearly asks for (quick_search.py),
+        so it never depends on the model remembering to. (search, tool result) or None."""
+        search = quick_search.detect(text)
+        if search is None or search.tool not in tools.REGISTRY:
+            return None
+        result = tools.run(search.tool, search.arguments)
+        print(f"[search] {search.tool} before the reply{' (play)' if search.play else ''}")
+        if search.play and search.tool == "find_video" and result.startswith("Videos found"):
+            result += ("\n\n" + (
+                "The user's phone app opens the first video in YouTube by itself right after "
+                "your reply: say in a few words what will play, e.g. \"Playing Kesariya by "
+                "Arijit Singh on YouTube.\"" if app else
+                "The first video is on the user's screen with a Play button: say what you "
+                "found and that they can tap Play. You can't play audio yourself."))
+        return search, result
+
     def _llm_sentences(self, text: str, lang: str, now: datetime, model: str,
-                       screen: str | None = None):
+                       screen: str | None = None, searched=None):
         history = self.memory.recent_turns(config.RECENT_TURNS)
         facts, related = self.memory.recall(text, now, exclude_recent_turns=config.RECENT_TURNS)
         usage = usage_summary(current_meters(self.memory, now), now, config.STOP_AT)
         reminders = self.reminders.prompt_summary(now) if self.reminders else None
         messages = llm.build_messages(text, lang, facts, related, history, now, screen, usage,
                                       reminders)
+        if searched:  # as if the model had called the tool itself
+            search, result = searched
+            messages.append({"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": search.tool, "arguments": search.arguments}}]})
+            messages.append({"role": "tool", "content": result, "tool_name": search.tool})
         chunker = llm.SentenceChunker()
         for piece in llm.stream_reply(messages, model):
             yield from chunker.feed(piece)
@@ -657,12 +689,13 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None,
         events: queue.Queue = queue.Queue()
 
         quiet = request.headers.get("x-quiet") == "1"  # Whisper mode on the page
+        from_app = APP_HEADER in request.headers  # (a valid token was checked already)
         via_tailnet = tailnet.is_tailnet_request(request.scope)
         mime = request.headers.get("content-type", "")
 
         def worker():
             try:
-                for event in assistant.handle_turn(audio, quiet, mime):
+                for event in assistant.handle_turn(audio, quiet, mime, app=from_app):
                     events.put(event)
             finally:
                 events.put(None)

@@ -33,7 +33,8 @@ the app, wake word) is the owner's choice.
 | Pair | **done 2026-10-01** (owner; also proves the ngrok app-header rule works) |
 | Voice | tap mic, speak, pause → reply on the **loudspeaker** (and Bluetooth when connected); first audio ≤ 3 s like the page; Whisper mode hears soft speech |
 | Interrupt | tap while speaking stops it and listens |
-| Cards | a search shows cards; a YouTube card opens the YouTube app |
+| Cards | "play Kesariya" -> card at once, reply, then the YouTube app opens by itself; "suggest romantic songs" -> several video cards; "price of …" -> price cards; log `[search] find_video before the reply (play)` |
+| Screen (app 0.2.0) | Screen -> allow "Display over other apps" -> Screen -> Start; in another app tap the bubble -> Jarvis opens listening -> answer about that screen, "(with screen)" after your words |
 | Reminders | "remind me in 10 minutes to …", close Jarvis → notification on time (lock screen shows only "You have a reminder") |
 | Goodbye / off | after 10 idle min the goodbye plays (app open); then **Start** opens the GitHub page |
 | Revoke | laptop Revoke → app shows "no longer paired" + Pair again |

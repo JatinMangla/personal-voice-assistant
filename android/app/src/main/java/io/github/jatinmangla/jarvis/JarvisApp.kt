@@ -23,6 +23,9 @@ class JarvisApp : Application() {
         var updateReady = false
 
         val updateFailed = MutableStateFlow(false)
+
+        /** Jarvis is on screen (the screen-sharing bubble hides then). */
+        val foreground = MutableStateFlow(false)
     }
 
     override fun onCreate() {
@@ -31,10 +34,12 @@ class JarvisApp : Application() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 inForeground = true
+                foreground.value = true
             }
 
             override fun onStop(owner: LifecycleOwner) {
                 inForeground = false
+                foreground.value = false
                 // Leaving the app is the quiet moment to update: on Android 12+ it installs
                 // without a tap, and nobody sees the app restart.
                 val updater = Updater(this@JarvisApp)

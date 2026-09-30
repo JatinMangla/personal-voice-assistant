@@ -95,6 +95,9 @@ class Api(private val pairing: Pairing) {
     suspend fun post(path: String, body: JSONObject = JSONObject()): JSONObject =
         json(request(path).post(body.toString().toRequestBody(JSON)).build())
 
+    suspend fun postBytes(path: String, bytes: ByteArray, mime: String): JSONObject =
+        json(request(path).post(bytes.toRequestBody(mime.toMediaType())).build())
+
     suspend fun status(): Status = Status.parse(get("/api/status"))
 
     suspend fun hello(): JSONObject = get("/api/app/hello")

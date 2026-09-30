@@ -175,7 +175,16 @@ The app has the same controls as the page: tap the mic and speak, **Whisper**, *
 link cards (YouTube opens in the YouTube app), and a green **Start** button while Jarvis is off (it opens
 your GitHub Start page).
 
+**Screen sharing on the phone (once):** tap **Screen** at the top. Android asks to allow
+**Display over other apps** for Jarvis (for the bubble): switch it on, go back, tap **Screen** again.
+Then Android asks to start recording/casting: choose **Entire screen** (or one app) → **Start**.
+
 The laptop page stays as a plain web page (no install), for the laptop and for pairing.
+
+**Old "Jarvis" icon from the web page:** if your phone still has the Jarvis icon you added from Chrome
+earlier (it opens in Chrome and may show a small Chrome badge), remove it: long-press it →
+**Uninstall** or **Remove**. The web page no longer offers installing, and it cleans up the old copy
+by itself the next time it opens.
 
 From a laptop you can do the same with `python scripts/start_jarvis.py` (needs `pip install kaggle` and the two values as environment variables).
 
@@ -199,10 +208,13 @@ The app and the page show minutes used today and when memory was last saved.
 | "याद रखना कि मेरी मीटिंग सोमवार को है" | Same, in Hindi |
 | "Forget that my car number…" / "…भूल जाओ" | Deletes the closest matching fact, and past chats that closely match it |
 | "Who sang Kesariya?" / "Latest India cricket score" | Searches the internet (Google first, then Bing, Brave or DuckDuckGo, then Wikipedia) and answers from the results. Free, no API key. |
-| "Play Arijit Singh's latest song" / "YouTube link of Kesariya" | Finds the video and shows a big card with a thumbnail and a red **▶ Play on YouTube** button. On Android it opens the **YouTube app** if installed, otherwise the browser; on iPhone it tries the app first. |
-| "Cheapest price of boAt Airdopes 141" | Searches shops, reads their prices, and says the cheapest. Cards show thumbnail, shop and a green price badge, cheapest first. Prices are approximate, and some shops block automatic reading. |
+| "Play Arijit Singh's latest song" / "Kesariya bajao" / "यूट्यूब पर भजन चलाओ" | Finds the video and shows a big card with a thumbnail and a red **Play on YouTube** button. In the **phone app**, after Jarvis says what it found, the video **opens in the YouTube app by itself**. On the laptop, tap Play. |
+| "Suggest some romantic songs" / "मुझे कुछ अच्छे गाने सुझाओ" | Video cards with several suggestions (nothing opens by itself). |
+| "Cheapest price of boAt Airdopes 141" / "iPhone 16 kitne ka hai" | Searches shops, reads their prices, and says the cheapest. Cards show thumbnail, shop and a green price badge, cheapest first. Prices are approximate, and some shops block automatic reading. |
+| "Suggest a good laptop for coding" / "recommend restaurants in Noida" | Searches the web first and shows link cards with the answer. |
 | Any search | Results appear as **preview cards** (thumbnail, site, title, short text), like WhatsApp link previews. The voice never reads web addresses. |
-| **🖥 Share screen** (laptop/desktop only) | Share a window or your screen, then ask "what's this error?", "summarise this page", etc. Each time you ask, Jarvis looks at **one snapshot**; nothing is recorded or saved. Phone browsers don't allow screen sharing. |
+| **🖥 Share screen** (laptop page) | Share a window or your screen, then ask "what's this error?", "summarise this page", etc. Each time you ask, Jarvis looks at **one snapshot**; nothing is recorded or saved. |
+| **Screen** (phone app, top) | Screen sharing on the phone. A round blue Jarvis **bubble** floats over your other apps. In any app, tap the bubble: Jarvis takes **one snapshot** of that screen, opens and listens, and you ask "what does this say?", "reply to this message for me", "which of these is cheaper?". The bubble can be dragged. Stop with **Stop screen** or the notification's **Stop sharing**. Nothing is recorded or saved; only a bubble tap takes a picture. |
 | **Clear** (top right) | Clears the chat on the screen only. Jarvis's memory is kept. |
 | **🤫 Whisper** (left of the mic) | For speaking softly, e.g. at night: Jarvis listens more sensitively and boosts your voice. It stays on until you tap it again. |
 | Just talk | Memory is automatic. Jarvis decides what's worth keeping: your details, preferences, settings, decisions, what you did and plan, and patterns like what you focus on. Say "forget that …" to remove something. |
@@ -222,6 +234,7 @@ The app and the page show minutes used today and when memory was last saved.
 |---|---|
 | Someone finds your link | **Yes.** Only your Google account can sign in (ngrok checks this before anything reaches Kaggle). The phone app skips Google sign-in, so every app request must carry a paired phone's key (256-bit, random); wrong keys are refused and slowed down. |
 | Your phone is lost or stolen | **Yes, once you revoke it.** Laptop page → Phone → Revoke: its key stops working at once. The key sits in the phone's secure hardware storage (Android Keystore) and is never backed up; the app keeps no chat history beyond the screen. A phone's key can't pair new phones. |
+| Screen sharing on the phone | **Only when you ask.** It runs only after you switch it on (Android shows its own sharing sign the whole time), and a picture is taken only when you tap the bubble; that one picture goes with that one question and is never saved. |
 | A fake app update | **Yes.** The app installs only files from the releases repo whose checksum matches and that are signed with the same key as the installed app (Android checks the key too). |
 | Your memory dataset leaks or is made public by mistake | **Yes.** It is only ciphertext; old versions are deleted on every save. |
 | Someone reads the notebook logs | **Yes.** Conversations are never printed. |

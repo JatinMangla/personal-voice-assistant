@@ -20,8 +20,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import io.github.jatinmangla.jarvis.screen.ScreenShare
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -81,6 +85,10 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
         UiState(pairing = store.pairing, whisper = store.whisper, startUrl = store.startUrl)
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
+
+    /** Videos to open in YouTube (the activity does it: it needs an Activity context). */
+    private val _openVideo = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val openVideo: SharedFlow<String> = _openVideo.asSharedFlow()
 
     private var turnJob: Job? = null
     private var listenJob: Job? = null
@@ -153,7 +161,12 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                 launch { runCatching { api?.post("/api/ping") } }
                 showDueNotes()
                 startPolling()
+                if (listenWhenConnected) {
+                    listenWhenConnected = false
+                    startListening()
+                }
             } else if (_state.value.phase == Phase.Thinking) {
+                listenWhenConnected = false
                 setPhase(Phase.Ready, _state.value.statusText)
             }
         }
@@ -258,6 +271,20 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // --- one spoken turn ------------------------------------------------------------------
+    private var listenWhenConnected = false
+
+    /** Start listening now (the screen bubble was tapped), or as soon as Jarvis is connected. */
+    fun listenNow() {
+        val s = _state.value
+        if (s.pairing == null || s.link == Link.Unpaired) return
+        if (s.link == Link.Online && s.phase != Phase.Listening) {
+            startListening()
+        } else if (s.link != Link.Online) {
+            listenWhenConnected = true
+            if (s.phase != Phase.Thinking) reconnect()
+        }
+    }
+
     fun onMic() {
         val s = _state.value
         if (s.pairing == null || s.link == Link.Unpaired) return
@@ -293,14 +320,30 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
         turnJob = viewModelScope.launch {
             setPhase(Phase.Thinking, "Thinking…")
             var botKey: Long? = null
+            var linksKey: Long? = null
+            var playVideo: String? = null
             try {
+                // Screen sharing: the snapshot taken when the bubble was tapped goes first
+                // (used for this one question only, never saved).
+                val usedScreen = ScreenShare.take()?.let { jpeg ->
+                    runCatching { api.postBytes("/api/screen", jpeg, "image/jpeg") }.isSuccess
+                } ?: false
                 api.turn(recording.audio, Recording.MIME, _state.value.whisper).collect { event ->
                     when (event) {
-                        is TurnEvent.Transcript -> if (event.text.isNotBlank()) addItem(ChatItem.You(key(), event.text))
+                        is TurnEvent.Transcript -> if (event.text.isNotBlank()) {
+                            addItem(ChatItem.You(key(), event.text + if (usedScreen) " (with screen)" else ""))
+                        }
                         is TurnEvent.Sentence -> {
                             val k = botKey
                             if (k == null) {
-                                botKey = key().also { addItem(ChatItem.Bot(it, event.text)) }
+                                val bot = ChatItem.Bot(key(), event.text)
+                                botKey = bot.key
+                                // Cards can come before the words (songs, prices): the reply
+                                // still goes above them.
+                                _state.update { st ->
+                                    val at = st.chat.indexOfFirst { it.key == linksKey }
+                                    st.copy(chat = if (at >= 0) st.chat.subList(0, at) + bot + st.chat.subList(at, st.chat.size) else st.chat + bot)
+                                }
                             } else {
                                 _state.update { st ->
                                     st.copy(chat = st.chat.map { if (it is ChatItem.Bot && it.key == k) it.copy(text = it.text + " " + event.text) else it })
@@ -308,7 +351,12 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                             }
                             event.audio?.let { player.enqueue(it) }
                         }
-                        is TurnEvent.Links -> if (event.links.isNotEmpty()) addItem(ChatItem.Links(key(), event.links))
+                        is TurnEvent.Links -> if (event.links.isNotEmpty()) {
+                            val item = ChatItem.Links(key(), event.links)
+                            if (linksKey == null && botKey == null) linksKey = item.key
+                            addItem(item)
+                            event.links.firstOrNull { it.play && it.isVideo }?.let { playVideo = it.videoId }
+                        }
                         is TurnEvent.Done -> {
                             if (!event.heard) {
                                 setPhase(Phase.Ready, "Didn't catch that. Tap to try again.")
@@ -322,6 +370,8 @@ class JarvisViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 player.awaitDone()
                 if (_state.value.phase != Phase.Ready) setPhase(Phase.Ready, "Tap to talk")
+                // "Play Kesariya": after Jarvis has said what it found, open it in YouTube.
+                playVideo?.let { _openVideo.tryEmit(it) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: ApiException) {
