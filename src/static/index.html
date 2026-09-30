@@ -114,6 +114,22 @@
   .start[hidden] { display: none; }
   .controls .left, .controls .right { min-width: 0; }
   #quiet { white-space: nowrap; }
+  /* pairing the Android app (laptop page) */
+  dialog { border: 1px solid var(--border); border-radius: 14px; background: var(--card); color: var(--fg);
+    width: min(92vw, 420px); padding: 16px; }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { font-size: 17px; margin: 0 0 8px; }
+  dialog p { margin: 6px 0; font-size: 14px; }
+  dialog .row { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+  dialog input { flex: 1; min-width: 0; font: inherit; padding: 6px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+  #qr { display: block; margin: 10px auto; background: #fff; padding: 8px; border-radius: 8px;
+    image-rendering: pixelated; max-width: 100%; }
+  #qr[hidden] { display: none; }
+  #devices { list-style: none; padding: 0; margin: 8px 0; font-size: 14px; }
+  #devices li { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 6px 0; border-top: 1px solid var(--border); }
+  #devices .when { color: var(--muted); font-size: 12px; }
 
   /* --- responsive ---------------------------------------------------------------- */
   /* small phones */
@@ -150,6 +166,7 @@
       <div class="brand"><h1 id="name">Jarvis</h1><span id="saved" class="meta">not saved yet</span></div>
       <div class="actions">
         <button id="share" class="chip" hidden title="Jarvis sees a snapshot of your screen each time you ask (laptop/desktop only)">🖥 Share screen</button>
+        <button id="pair" class="chip" title="Connect the Jarvis app on your phone">Phone</button>
         <button id="clear" class="chip" title="Clears this screen only; Jarvis's memory is kept">Clear</button>
       </div>
     </header>
@@ -173,6 +190,20 @@
     </div>
   </div>
 </main>
+<dialog id="pairDlg" aria-labelledby="pairTitle">
+  <h2 id="pairTitle">Jarvis app on your phone</h2>
+  <p>Get the app: <a href="https://github.com/JatinMangla/jarvis-app" target="_blank" rel="noopener noreferrer">github.com/JatinMangla/jarvis-app</a></p>
+  <div class="row">
+    <input id="pairName" maxlength="40" value="Phone" aria-label="Name of the phone">
+    <button id="pairMake" class="chip">Show pairing code</button>
+  </div>
+  <canvas id="qr" hidden aria-label="Pairing code"></canvas>
+  <p id="pairNote" class="meta"></p>
+  <h2>Paired devices</h2>
+  <ul id="devices"></ul>
+  <div class="row" style="justify-content:flex-end"><button id="pairClose" class="chip">Close</button></div>
+</dialog>
+<script src="qrcode.js"></script>
 <script>
 const HEADERS = { "ngrok-skip-browser-warning": "1" };
 const $ = (id) => document.getElementById(id);
@@ -664,6 +695,95 @@ async function showDueReminders() {
     }
   } catch (e) {}
 }
+// ---------- pair the Jarvis Android app (this page is behind Google sign-in) ----------
+// The QR code holds this address and a new device token, shown once; the app keeps the
+// token in the phone's secure storage. Unused, it expires after 5 minutes.
+let pairTimer = null;
+function drawQr(text) {
+  const qr = qrcode(0, "M");
+  qr.addData(text); qr.make();
+  const n = qr.getModuleCount(), cell = 5, size = n * cell;
+  const canvas = $("qr");
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, size, size);
+  g.fillStyle = "#000";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) g.fillRect(c * cell, r * cell, cell, cell);
+  canvas.hidden = false;
+}
+function hideQr() {
+  clearTimeout(pairTimer);
+  const canvas = $("qr");
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  canvas.hidden = true;
+}
+async function loadDevices() {
+  const list = $("devices");
+  try {
+    const r = await fetch("api/app/devices", { headers: HEADERS });
+    if (!r.ok) throw new Error();
+    const devices = (await r.json()).devices;
+    list.replaceChildren(...devices.map((d) => {
+      const li = el("li");
+      const info = el("div");
+      info.appendChild(el("div", "", d.name));
+      const when = d.paired ? (d.last_used ? "last used " + new Date(d.last_used).toLocaleString() : "paired")
+                            : "waiting for the app to scan";
+      info.appendChild(el("div", "when", when));
+      const revoke = el("button", "chip", d.paired ? "Revoke" : "Cancel");
+      revoke.addEventListener("click", async () => {
+        if (d.paired && !confirm("Revoke " + d.name + "? The app on it stops working until you pair it again.")) return;
+        await fetch("api/app/devices/revoke", { method: "POST",
+          headers: { ...HEADERS, "Content-Type": "application/json" }, body: JSON.stringify({ id: d.id }) }).catch(() => {});
+        hideQr();
+        loadDevices();
+      });
+      li.append(info, revoke);
+      return li;
+    }));
+    if (!devices.length) list.replaceChildren(el("li", "when", "No phone paired yet."));
+    return devices;
+  } catch (e) {
+    list.replaceChildren(el("li", "when", "Jarvis is off: start it to pair a phone."));
+    return null;
+  }
+}
+// While a code is shown: check every 5 s (1 link request each) until the phone used it.
+let pairWatch = null;
+function watchPairing() {
+  clearInterval(pairWatch);
+  pairWatch = setInterval(async () => {
+    if ($("qr").hidden || !$("pairDlg").open) { clearInterval(pairWatch); return; }
+    const devices = await loadDevices();
+    if (devices && !devices.some((d) => !d.paired)) {
+      hideQr(); clearInterval(pairWatch);
+      $("pairNote").textContent = "Paired. The app is ready.";
+    }
+  }, 5000);
+}
+$("pair").addEventListener("click", () => { $("pairNote").textContent = ""; hideQr(); loadDevices(); $("pairDlg").showModal(); });
+$("pairClose").addEventListener("click", () => $("pairDlg").close());
+$("pairDlg").addEventListener("close", hideQr);
+$("pairMake").addEventListener("click", async () => {
+  const note = $("pairNote");
+  try {
+    const r = await fetch("api/app/pair", { method: "POST",
+      headers: { ...HEADERS, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("pairName").value }) });
+    const data = await r.json();
+    if (!r.ok) { note.textContent = data.error || "Could not make a pairing code."; return; }
+    drawQr(JSON.stringify({ jarvis: 1, url: location.origin, token: data.token }));
+    note.textContent = "In the Jarvis app, tap Scan and point the phone at this code. It works once, for 5 minutes.";
+    clearTimeout(pairTimer);
+    pairTimer = setTimeout(() => { hideQr(); note.textContent = "The code expired. Make a new one if needed."; loadDevices(); },
+                           data.expires_in * 1000);
+    loadDevices();
+    watchPairing();
+  } catch (e) {
+    note.textContent = "Jarvis is off: start it to pair a phone.";
+  }
+});
+
 reconnect();
 </script>
 </body>

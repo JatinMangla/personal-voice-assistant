@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
 import config
+import devices as devices_module
 import digest
 import learn
 import llm
@@ -39,6 +40,13 @@ def no_emoji(text: str) -> str:
     return re.sub(r"\s+([.,!?।])", r"\1", text)  # "today ✅." -> "today."
 
 STATIC_DIR = Path(__file__).parent / "static"
+# The server contract the Android app talks to; raise it when events or endpoints change
+# in a way an older app would misread.
+API_VERSION = 1
+APP_HEADER = "x-jarvis-app"  # the app sends it; tunnel.traffic_policy skips Google sign-in
+# Pairing and device management: only from the page (Google sign-in or password), never
+# with an app token, so a stolen phone can't make itself new tokens.
+BROWSER_ONLY = {"/api/app/pair", "/api/app/devices", "/api/app/devices/revoke"}
 
 PHRASES = {
     "en": {
@@ -117,6 +125,7 @@ class Assistant:
                  reminders=None):
         self.stt, self.tts, self.memory, self.store, self.timer = stt, tts, memory, store, timer
         self.reminders = reminders  # reminders.Reminders, or None
+        self.devices = devices_module.Devices(memory)  # paired phones (the Android app)
         self.bridge = None          # bridge.HomeBridge (the home helper), or None
         self.restart_ollama = restart_ollama
         self.picker = picker or llm.ModelPicker(config.LLM_MODEL, None, {})
@@ -343,6 +352,7 @@ class Assistant:
         return {
             "state": self.state,
             "name": config.ASSISTANT_NAME,
+            "api": API_VERSION,
             "idle_left_sec": int(idle_left),
             "last_saved": datetime.fromtimestamp(last, ZoneInfo(config.TIMEZONE)).strftime("%H:%M")
                           if last else None,
@@ -522,7 +532,17 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None,
     @app.middleware("http")
     async def security(request: Request, call_next):
         via_tailnet = tailnet.is_tailnet_request(request.scope)
-        if via_tailnet:
+        from_app = APP_HEADER in request.headers
+        if from_app and request.url.path in BROWSER_ONLY:
+            return JSONResponse({"error": "open this on the page, not in the app"}, status_code=403)
+        if from_app and not via_tailnet:
+            # ngrok let this request skip Google sign-in because of the app header, so a
+            # paired device's token is required, whatever else the request carries.
+            device, locked = assistant.devices.check(request.headers.get("authorization"), now_ist())
+            if device is None:
+                return JSONResponse({"error": "too many attempts" if locked else "not paired"},
+                                    status_code=429 if locked else 401)
+        elif via_tailnet:
             # `tailscale serve` sets this header and removes any copy the browser sent.
             login = request.headers.get("tailscale-user-login", "").strip().lower()
             if not login or login not in allowed_tailnet:
@@ -569,6 +589,40 @@ def create_app(assistant: Assistant, gate: PasswordGate | None = None,
     @app.get("/api/status")
     def status():
         return assistant.status()
+
+    @app.get("/qrcode.js")
+    def qrcode_js():  # QR codes for pairing a phone, drawn in the page (no web service)
+        return FileResponse(STATIC_DIR / "qrcode.js", media_type="text/javascript")
+
+    # --- the Android app: pairing (page only) and its first check -------------------
+    @app.post("/api/app/pair")
+    async def pair(request: Request):
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        token = assistant.devices.mint(str((body or {}).get("name", "")), now_ist())
+        if token is None:
+            return JSONResponse({"error": f"at most {devices_module.MAX_DEVICES} devices; "
+                                          "revoke one first"}, status_code=409)
+        return {"token": token, "expires_in": devices_module.PAIR_TTL_SEC}
+
+    @app.get("/api/app/devices")
+    def list_devices():
+        return {"devices": assistant.devices.list()}
+
+    @app.post("/api/app/devices/revoke")
+    async def revoke_device(request: Request):
+        body = await request.json()
+        try:
+            return {"ok": assistant.devices.revoke(int(body["id"]))}
+        except (KeyError, TypeError, ValueError):
+            return JSONResponse({"error": "bad id"}, status_code=400)
+
+    @app.get("/api/app/hello")
+    def app_hello():
+        """The app's first request after scanning the QR code (this finishes pairing)."""
+        return {"ok": True, "name": config.ASSISTANT_NAME, "api": API_VERSION}
 
     @app.post("/api/ping")
     def ping():

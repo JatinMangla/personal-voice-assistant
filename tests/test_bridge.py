@@ -94,9 +94,9 @@ def test_wake_topic_matches_on_both_sides():
 
 
 def test_ngrok_policy_skips_google_sign_in_only_for_the_helper_path():
-    plain = tunnel.traffic_policy(["me@gmail.com"])
+    plain = tunnel.traffic_policy(["me@gmail.com"], app_header=False)
     assert "expressions" not in plain["on_http_request"][0]
-    policy = tunnel.traffic_policy(["me@gmail.com"], bridge_path=True)
+    policy = tunnel.traffic_policy(["me@gmail.com"], bridge_path=True, app_header=False)
     oauth, deny = policy["on_http_request"]
     assert oauth["expressions"] == ["!req.url.path.startsWith('/api/bridge/')"]
     assert deny["expressions"][0].startswith("!req.url.path.startsWith('/api/bridge/') && ")

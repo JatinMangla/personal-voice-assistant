@@ -17,16 +17,25 @@ NGROK_BIN = "/usr/local/bin/ngrok"  # Kaggle; at home, the ngrok found on PATH
 
 
 BRIDGE_PATH = "/api/bridge/"
+APP_HEADER = "x-jarvis-app"  # sent by the Jarvis Android app (ngrok header names are lowercase)
 
 
-def traffic_policy(allowed_emails: list[str], bridge_path: bool = False) -> dict:
-    """Google sign-in for everything. With bridge_path, the home helper's WebSocket path
-    skips it: the app checks its BRIDGE_KEY instead (a helper can't do a Google login)."""
-    skip = f"!req.url.path.startsWith('{BRIDGE_PATH}')"
+def traffic_policy(allowed_emails: list[str], bridge_path: bool = False,
+                   app_header: bool = True) -> dict:
+    """Google sign-in for everything, except (the app then checks its own key instead):
+    - with bridge_path: the home helper's WebSocket path (a helper can't do a Google login);
+    - with app_header: requests from the Android app (they carry X-Jarvis-App and must have
+      a paired device's token, which app.py requires for every such request)."""
+    skips = []
+    if bridge_path:
+        skips.append(f"!req.url.path.startsWith('{BRIDGE_PATH}')")
+    if app_header:
+        skips.append(f"!('{APP_HEADER}' in req.headers)")
+    skip = " && ".join(skips)
     signed_out = f"!(actions.ngrok.oauth.identity.email in {json.dumps(allowed_emails)})"
     oauth = {"actions": [{"type": "oauth", "config": {"provider": "google"}}]}
     deny = {"expressions": [signed_out], "actions": [{"type": "deny", "config": {"status_code": 403}}]}
-    if bridge_path:
+    if skip:
         oauth["expressions"] = [skip]
         deny["expressions"] = [f"{skip} && {signed_out}"]
     return {"on_http_request": [oauth, deny]}
