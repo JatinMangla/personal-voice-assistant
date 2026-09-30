@@ -1,0 +1,119 @@
+# Builds the signed Jarvis app and publishes it to the PUBLIC releases-only repo
+# JatinMangla/jarvis-app (APK + SHA256SUMS + latest.json; no source, no secrets).
+# The app on the phone reads latest.json and updates itself.
+#
+# Start: push a tag like app-v0.2.0, or Actions -> "Android release" -> Run workflow.
+# Secrets: ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+# ANDROID_KEY_PASSWORD (signing key), APP_DEPLOY_KEY (SSH deploy key with write access to
+# jarvis-app only).
+name: Android release
+
+on:
+  push:
+    tags: ["app-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version name, e.g. 0.2.0"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+
+env:
+  PUBLIC_REPO: JatinMangla/jarvis-app
+  # SHA-256 of the signing certificate: a build signed with anything else is never published.
+  SIGNER_SHA256: d9c29311a095569ad60a0c896787bdb748a6a52029fab3baa97cc78fde12f995
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then v="${GITHUB_REF_NAME#app-v}"; else v="$INPUT_VERSION"; fi
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::version must look like 1.2.3, got '$v'"; exit 1; fi
+          echo "VERSION_NAME=$v" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Build signed release
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.p12"
+          echo "$KEYSTORE_B64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          ./gradlew --no-daemon testReleaseUnitTest assembleRelease \
+            -PversionCode="$VERSION_CODE" -PversionName="$VERSION_NAME"
+          rm -f "$ANDROID_KEYSTORE_PATH"
+
+      - name: Check the signature
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          signer="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$signer" verify --print-certs "$apk" | tee /tmp/certs.txt
+          grep -qi "SHA-256 digest: $SIGNER_SHA256" /tmp/certs.txt || { echo "::error::wrong signing key"; exit 1; }
+
+      - name: Publish to the public releases repo
+        env:
+          DEPLOY_KEY: ${{ secrets.APP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          name="jarvis-$VERSION_NAME.apk"
+          out="$RUNNER_TEMP/publish"; mkdir -p "$out/apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$out/apk/$name"
+          cd "$out"
+          sha=$(sha256sum "apk/$name" | cut -d' ' -f1)
+          size=$(stat -c %s "apk/$name")
+          url="https://raw.githubusercontent.com/$PUBLIC_REPO/main/apk/$name"
+          echo "$sha  apk/$name" > SHA256SUMS
+          jq -n --argjson code "$VERSION_CODE" --arg name "$VERSION_NAME" --arg apk "$url" \
+                --arg sha "$sha" --argjson size "$size" --arg signer "$SIGNER_SHA256" \
+                --arg published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{versionCode: $code, versionName: $name, apk: $apk, sha256: $sha, size: $size,
+                  minSdk: 29, signerSha256: $signer, published: $published}' > latest.json
+          cat > README.md <<README
+          # Jarvis app (releases only)
+
+          This repository holds **only** the installable Android app of Jarvis, a private voice
+          assistant: the APK, its SHA-256 checksum and \`latest.json\` (what the app reads to
+          update itself). No source code and no secrets are here; a GitHub Action in a private
+          repository publishes each version. Only the newest version is kept.
+
+          **Latest: $VERSION_NAME** -> [download $name]($url)
+
+          First install on the phone: tap the download link above. Chrome asks to allow
+          "install unknown apps": Settings -> Allow from this source -> back -> Install.
+          After that, the app updates itself.
+
+          SHA-256: \`$sha\`
+          Signing certificate SHA-256: \`$SIGNER_SHA256\`
+          README
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/deploy -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
+          git init -q -b main
+          git -c user.name="jarvis-release-bot" -c user.email="noreply@github.com" add -A
+          git -c user.name="jarvis-release-bot" -c user.email="noreply@github.com" commit -qm "Jarvis app $VERSION_NAME (build $VERSION_CODE)"
+          # One commit with only the newest APK: the public repo never grows.
+          git push --force "git@github.com:$PUBLIC_REPO.git" main
+          rm -f ~/.ssh/deploy
+          echo "Published $name ($size bytes) sha256 $sha" >> "$GITHUB_STEP_SUMMARY"

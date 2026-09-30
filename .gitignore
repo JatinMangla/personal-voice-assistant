@@ -6,3 +6,6 @@ assistant-code.zip
 kaggle.json
 *.enc
 .env
+*.jks
+*.p12
+*.keystore
