@@ -29,8 +29,8 @@ the app, wake word) is the owner's choice.
 
 | Check | Expected |
 |---|---|
-| Install | github.com/JatinMangla/jarvis-app → download → install (allow unknown apps once) |
-| Pair | Laptop page → Phone → Show pairing code → app Scan → page says "Paired"; log `[devices] a phone finished pairing` |
+| Install | **done 2026-10-01** (owner) |
+| Pair | **done 2026-10-01** (owner; also proves the ngrok app-header rule works) |
 | Voice | tap mic, speak, pause → reply on the **loudspeaker** (and Bluetooth when connected); first audio ≤ 3 s like the page; Whisper mode hears soft speech |
 | Interrupt | tap while speaking stops it and listens |
 | Cards | a search shows cards; a YouTube card opens the YouTube app |

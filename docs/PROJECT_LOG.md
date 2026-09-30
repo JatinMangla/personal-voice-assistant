@@ -408,6 +408,10 @@ run on Kaggle or a device yet.
 - Phase 7: PWA removed (manifest, icons, install tags); `sw.js` is now a kill switch that
   deletes the old cache and unregisters itself; the page unregisters old workers.
 
+- 2026-10-01: the owner installed app 0.1.0 from jarvis-app and paired it: confirms the
+  sideload install, QR scan, the ngrok `X-Jarvis-App` rule on the real ngrok, token auth and
+  the token rotation on a real phone.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).
