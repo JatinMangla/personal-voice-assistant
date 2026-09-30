@@ -10,9 +10,12 @@ click-by-click steps. Build and test locally (`.venv\Scripts\python -m pytest te
 `node --check` for page JS), then commit and push to `main`. Pushing auto-uploads `src/` to
 Kaggle, and the owner presses **Start Jarvis** on GitHub.
 
-**State (2026-09-28, night 2):** every item of the previous plan is built and unit-tested
-(296 tests), except split storage and float16 vectors, which wait for their trigger (§2).
-**None of it has run on Kaggle or a real device yet.** So the next job is §0.
+**State (2026-09-30):** every item of the previous plan is built and unit-tested (338 tests),
+except split storage and float16 vectors, which wait for their trigger (§2). On 2026-09-29 a
+Kaggle run with all of it started fine (version 28, ngrok link); the features themselves
+haven't been used on the phone yet, so the next job is still §0. Then §0b (washer).
+Tailscale is home-PC only: Kaggle kills runs that start it (CLAUDE.md gotcha 27). To read a
+run's log yourself: `gh workflow run "Jarvis log"` then `gh run view <id> --log`.
 
 ---
 
@@ -85,7 +88,7 @@ change to memory (hard rule 3), and it isn't needed yet.
 
 | Stage | Status | What the owner needs |
 |---|---|---|
-| A **Home PC** | `PVA_HOSTING=home`, `scripts/run_home.py`, `LocalMemoryStore`, CPU fallback | A PC (NVIDIA GPU ideal), README "Run on your own PC". Re-ask about Tailscale/Cloudflare only if ngrok isn't enough. |
+| A **Home PC** | `PVA_HOSTING=home`, `scripts/run_home.py`, `LocalMemoryStore`, CPU fallback, Tailscale via the PC's own app (`tailnet.setup`, system mode) | A PC (NVIDIA GPU ideal), README "Run on your own PC" + "Private link with Tailscale". The owner already uses Tailscale on their phone. |
 | B **Wake word** | `local_voice.py`, "Hey Jarvis" (openWakeWord) on the PC's mic + speakers | Home PC with a mic/speaker. Tune `WAKE_THRESHOLD` if it wakes by mistake or misses. |
 | C **Home devices** | `home.py`: Home Assistant allowlist, spoken yes unless `"confirm": false` | Home Assistant + integrations, `HA_URL`, `HA_TOKEN`, `HOME_DEVICES`. **Samsung washer: SmartThings API is paid from Oct 2026 → use a power-monitoring plug (status only). Qubo Q400 purifier: no integration exists → local smart plug or IR blaster.** See CLAUDE.md gotcha 26. |
 | D **Cameras** | `look_at_camera`: one snapshot to Qwen3.5 vision, never stored | Cameras in Home Assistant (RTSP/ONVIF). Face recognition is not built (privacy: would need consent of people filmed). |

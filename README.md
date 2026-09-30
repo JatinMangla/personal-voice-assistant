@@ -205,7 +205,7 @@ The page shows minutes used today and when memory was last saved.
 | A web page tricking Jarvis into switching something on | **Yes.** Device actions run only after *your* spoken "yes" on the very next question, checked by fixed rules, not by the AI. Only devices and actions you listed exist. |
 | The Start button reading your memory | **No, it can't.** It reads only a separate small encrypted file with usage numbers (GPU minutes, link counts), never conversations or facts. |
 | Reminder notifications | **Private by default.** The phone notification only says "You have a reminder"; the reminder text stays in your memory. |
-| ngrok seeing your traffic | **With Tailscale: yes, protected.** ngrok decrypts traffic to do the Google sign-in; the Tailscale link is encrypted from your phone to Jarvis, and Jarvis also checks your Tailscale login. |
+| ngrok seeing your traffic | **On the home PC with Tailscale: protected.** On Kaggle: no (ngrok can technically see it). ngrok decrypts traffic to do the Google sign-in; the Tailscale link is encrypted from your phone to Jarvis, and Jarvis also checks your Tailscale login. |
 | Your Google/Kaggle/GitHub account is hacked | **No.** The key sits in Kaggle Secrets, and the Kaggle token (also in GitHub if you use the Start button) can run notebooks that use it. That's why 2-step verification on all three is essential. |
 | Kaggle/Google or ngrok looking at live traffic | **No.** While running, data is on their machines. The only fix is running on your own PC later (same code). |
 
@@ -289,43 +289,23 @@ scheduled the next time you start Jarvis). The notification only says "You have 
 
 **Not on Kaggle:** Kaggle stopped every run that started Tailscale (tested 2026-09-29), and
 trying to get around that could put your Kaggle account at risk. On Kaggle, Jarvis uses the
-ngrok link with Google sign-in. The steps below are for when Jarvis runs on your own PC.
+ngrok link with Google sign-in (see the Security table: only your Google account gets in).
 
-With Tailscale, your phone talks to Jarvis **end-to-end encrypted**: no public address exists
-at all, only your own devices can reach it, there are no ngrok monthly limits, and the path
-is often shorter.
+When Jarvis runs on **your own PC** (see "Run on your own PC"), Tailscale gives the best link:
+end-to-end encrypted from your phone to the PC, no public address at all, no ngrok limits.
 
-**As soon as the `TS_AUTHKEY` secret exists, Jarvis is Tailscale-only**: the public ngrok link
-is not opened. Only if Tailscale fails to start does it use ngrok for that run (if the ngrok
-secrets are still there), and the log says so. To open the public link as well later (e.g. for
-devices without Tailscale), set `USE_NGROK = True` in `src/config.py`.
+1. Install the **Tailscale app on the PC** and sign in with the same account as on your phone.
+2. Tailscale admin page (login.tailscale.com) → **DNS** → **HTTPS Certificates** → **Enable**
+   (phone browsers allow the microphone only on https pages).
+3. In `~/.jarvis/secrets.env` keep `ALLOWED_EMAIL=<your Tailscale login>` (or add
+   `TAILSCALE_USERS=<login>` if your Tailscale login isn't that Gmail).
+   Leave out the `NGROK_…` lines if you want **Tailscale only** (no public link at all).
+4. Start Jarvis (`scripts\run_home.py`). It runs `tailscale serve` by itself; the log shows
+   `[ready]  -> https://<pc-name>.<tailnet>.ts.net (Tailscale…)`.
+5. On the phone (Tailscale connected), open that link → **⋮ → Add to Home screen**.
 
-**Once, in Tailscale's admin page** (login.tailscale.com, on a laptop):
-1. **DNS** (top menu) → check that **MagicDNS** is on → scroll to **HTTPS Certificates** →
-   **Enable**. (Phone browsers allow the microphone only on https pages; this gives Jarvis a
-   real https certificate.)
-2. **Settings → Keys → Generate auth key…**: Reusable **on**, Ephemeral **off**,
-   Pre-approved **on** (if shown), Expiration 90 days → **Generate** → copy the `tskey-auth-…`
-   text. (Jarvis uses it only for its very first login; after that it remembers itself.)
-3. Add the secret **TS_AUTHKEY** = that text: in Kaggle (Add-ons → Secrets, tick it for the
-   Jarvis notebook) **and** on GitHub (repo → Settings → Secrets and variables → Actions →
-   New repository secret).
-4. If you sign in to Tailscale with a different account than your `ALLOWED_EMAIL` Gmail (for
-   example with GitHub), also add **TAILSCALE_USERS** = your Tailscale login (the page tells
-   you which one if it refuses you).
-
-**Then:**
-5. Start Jarvis. The log shows `[ready]  -> https://jarvis.<something>.ts.net  (Tailscale…)`.
-6. Admin page → **Machines** → `jarvis` → **⋯** → **Disable key expiry** (otherwise it would
-   need a new login after 180 days).
-7. On the phone, with the Tailscale app connected, open that link in Chrome → **⋮ → Add to
-   Home screen**. The very first visit can take ~20 s (the certificate is being made).
-
-You can keep the `NGROK_AUTHTOKEN` and `NGROK_DOMAIN` secrets as the emergency fallback, or
-delete them; the Start button works either way.
-
-Note: https certificates are public records, so the name `jarvis.<something>.ts.net` is
-visible on the internet, but nobody outside your tailnet can connect to it.
+Note: https certificates are public records, so the PC's `….ts.net` name is visible on the
+internet, but nobody outside your tailnet can connect to it.
 
 ## Samsung washing machine, free (home helper on your phone)
 

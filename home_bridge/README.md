@@ -88,15 +88,14 @@ TARGET_IP=192.168.1.50 python setup_cert.py --test
    the washer's address in place of the examples):
    ```
    cd ~/jarvis
-   echo "JARVIS_URL=https://jarvis.YOUR-TAILNET.ts.net" > bridge.env
+   echo "JARVIS_URL=https://volley-gnarly-constable.ngrok-free.dev" > bridge.env
    echo "BRIDGE_KEY=paste-the-key-here" >> bridge.env
    echo "WASHER_IP=192.168.1.50" >> bridge.env
    ```
 
-`JARVIS_URL` is Jarvis's **Tailscale** address (the log shows it as
-`[ready]  -> https://jarvis.….ts.net`): the helper then talks to Jarvis privately, with the
-Tailscale app on your phone connected. Without Tailscale, use your ngrok address
-(`https://volley-gnarly-constable.ngrok-free.dev`) instead.
+`JARVIS_URL` is your usual ngrok address while Jarvis runs on Kaggle (the helper's own
+path is protected by BRIDGE_KEY instead of Google sign-in). Later, when Jarvis runs on a home
+PC with Tailscale, put the PC's `https://….ts.net` address here instead.
 
 ### 7. Start the helper
 ```
@@ -110,7 +109,8 @@ So that Android doesn't stop it: phone **Settings → Apps → Termux → Batter
 Every time Jarvis starts, the helper connects by itself within a few seconds. After a phone
 restart, open Termux and run the two lines of step 7 again.
 
-If Termux says it can't find the `ts.net` name, tell Termux to use Tailscale's name server:
+(Home PC with Tailscale only:) if Termux says it can't find the `ts.net` name, tell Termux
+to use Tailscale's name server:
 ```
 echo "nameserver 100.100.100.100" > $PREFIX/etc/resolv.conf
 echo "nameserver 8.8.8.8" >> $PREFIX/etc/resolv.conf
