@@ -371,6 +371,15 @@ run on Kaggle or a device yet.
   started normally. Kaggle's rules forbid circumventing the service, so Tailscale stays
   off on Kaggle (`USE_TAILSCALE = HOME`) and is kept for the home PC.
 
+## 2026-09-30: Android app planned
+
+- The owner wants a native Android app instead of the PWA, distributed and updated via GitHub
+  without the Play Console. Research: Google's developer verification is enforced in India
+  from 2027 (a free limited-distribution account covers 20 devices; payments profile needed,
+  check it asks for no card); Android 12+ allows silent self-updates; private-repo release
+  assets need a login, so APKs go to a public releases-only repo. Plan and phases:
+  [ANDROID_APP_PLAN.md](ANDROID_APP_PLAN.md).
+
 ## Open items / next steps
 - Next run: the checks in FUTURE_PLANS.md section 0 (old list + the new features).
 - The owner adds the remaining GitHub repo secrets, then tests the Start button end to end.

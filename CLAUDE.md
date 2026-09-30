@@ -5,7 +5,9 @@ The full history (every problem, fix, measurement) is in [docs/PROJECT_LOG.md](d
 the user-facing guide is [README.md](README.md); the original plan review is [docs/PLAN.md](docs/PLAN.md);
 **what to do next** is in [docs/FUTURE_PLANS.md](docs/FUTURE_PLANS.md);
 memory retrieval research and the chosen direction (hybrid SQLite: FTS5 + vectors + RRF +
-date/category filters; later time-summary tree + split storage) is [docs/MEMORY_RESEARCH.md](docs/MEMORY_RESEARCH.md).
+date/category filters; later time-summary tree + split storage) is [docs/MEMORY_RESEARCH.md](docs/MEMORY_RESEARCH.md);
+**the planned Android app that replaces the PWA** (Kotlin, GitHub releases, self-update, device
+tokens) is [docs/ANDROID_APP_PLAN.md](docs/ANDROID_APP_PLAN.md).
 
 ## What this is
 A private, Alexa-style voice assistant that the owner (GitHub `JatinMangla`, Kaggle
@@ -231,6 +233,10 @@ node --check src/static/sw.js                  # and the <script> of index.html
     memory must never replace the real one).
 
 ## Status (2026-09-30): read this first
+- **Next big project (owner's request): an Android app instead of the PWA**, released and
+  self-updated through GitHub (no Play Console). Plan, decisions to confirm, phases, research
+  and the owner's click-by-click steps: [docs/ANDROID_APP_PLAN.md](docs/ANDROID_APP_PLAN.md).
+  Not started.
 - **Works on Kaggle (2026-09-29, version 28):** start-up with all new code reached the ngrok
   link (Google sign-in). Nobody has used/tested the new features on the phone yet: that is
   FUTURE_PLANS §0.

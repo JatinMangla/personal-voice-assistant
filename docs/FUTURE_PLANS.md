@@ -19,6 +19,13 @@ run's log yourself: `gh workflow run "Jarvis log"` then `gh run view <id> --log`
 
 ---
 
+## Next big project: the Android app (replaces the PWA)
+
+The owner wants a native phone app, released and updated through GitHub, and the PWA removed.
+Full plan: [ANDROID_APP_PLAN.md](ANDROID_APP_PLAN.md). Start with its §3 decisions (confirm
+them with the owner) and phase 0. Do §0 below whenever the owner runs Jarvis, since the app
+builds on the same server features.
+
 ## 0. First: confirm on Kaggle and on a real device
 
 Ask the owner to start Jarvis and paste the log. Check each item; fix what fails before new work.
