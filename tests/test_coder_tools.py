@@ -504,3 +504,32 @@ def test_status_tells_a_refused_key_from_an_offline_coder(repo, tmp_path):
     assert "offline (press Start Coder; key fingerprint here" in make(repo, tmp_path / "b", down).status()
     up = client_with(lambda r: httpx.Response(200, json={}))
     assert "online (key fingerprint" in make(repo, tmp_path / "c", up).status()
+
+
+# --- ranking: code before prose, exact names first (first run, 2026-10-09) -------------------
+def test_code_outranks_the_docs_that_describe_it(repo, tmp_path):
+    # Same shape as the real src/budget.py: the docstring uses the words of the question.
+    (repo / "src" / "budget.py").write_text(
+        'def start_blocker(meters, budget):\n'
+        '    """The limit that forbids starting now, if any: already at the auto-stop, or too\n'
+        '    little left for a session (start-up alone takes a few minutes)."""\n'
+        '    return budget.over_stop(meters) or budget.too_little_left(meters, 5)\n')
+    (repo / "docs").mkdir()
+    (repo / "docs" / "PLAN.md").write_text(
+        "The limit that forbids starting now is checked before the GPU work starts; "
+        "it refuses when too little time is left for a session.\n" * 3)
+    (repo / "README.md").write_text("Which limit forbids starting now: see the budget guard.\n" * 3)
+    coder = make(repo, tmp_path, None)
+    top = coder.search_code("which limit forbids starting now").splitlines()[0]
+    assert "src/budget.py" in top and "start_blocker" in top
+    # The prose is still found, and comes first when the question asks for the docs.
+    assert "docs/PLAN.md" in coder.search_code("limit forbids starting now")
+    asked = coder.search_code("docs about the limit that forbids starting")
+    assert "docs/PLAN.md" in asked.splitlines()[0] or "README.md" in asked.splitlines()[0]
+
+
+def test_a_name_that_matches_every_word_comes_first(repo, tmp_path):
+    (repo / "src" / "other.py").write_text(
+        "def helper():\n    # start blocker start blocker start blocker\n    return 1\n" * 4)
+    coder = make(repo, tmp_path, None)
+    assert "start_blocker" in coder.search_code("start blocker").splitlines()[0]

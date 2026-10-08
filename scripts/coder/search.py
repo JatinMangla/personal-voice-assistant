@@ -68,13 +68,20 @@ def by_symbol(index, terms: list[str], limit: int = CANDIDATES) -> list[int]:
 
 TEST_PENALTY = 0.7   # tests mention everything; real code should come first unless asked for
 TEST_PATH = re.compile(r"(^|/)(tests?|androidTest)/|(^|/)test_[^/]*$|Tests?\.kt$|_test\.py$")
+# Docs describe the code in the question's own words, so they beat the code on keywords while
+# answering "where is it" worse. First observed 2026-10-09: "which limit forbids starting now"
+# put README.md and a doc above budget.start_blocker.
+PROSE_PENALTY = 0.6
+PROSE_PATH = re.compile(r"\.(md|txt|rst)$", re.I)
+PROSE_WORDS = ("doc", "docs", "readme", "plan", "log", "guide", "notes")
+NAME_BONUS = 1.6     # the chunk's own name holds every word of the question: this IS the answer
 MIN_COVERAGE_WEIGHT = 0.5   # a chunk holding none of the words keeps half its score
 
 
 def _rescore(index, ranked: dict, terms: list[str]) -> tuple[dict, dict]:
-    """Scale each fused score by how many of the question's words the chunk really holds
-    (so a hit on one common word loses to a chunk with all of them), and push tests down
-    unless the question is about tests. Returns (scores, rows by id)."""
+    """Scale each fused score by how many of the question's words the chunk really holds (so a
+    hit on one common word loses to a chunk with all of them), lift a chunk whose own NAME holds
+    them, and push tests and prose down unless the question asks for them. Returns (scores, rows)."""
     if not ranked:
         return {}, {}
     marks = ",".join("?" for _ in ranked)
@@ -82,6 +89,7 @@ def _rescore(index, ranked: dict, terms: list[str]) -> tuple[dict, dict]:
         rows = {r["id"]: r for r in index.conn.execute(
             f"SELECT id, path, first, last, kind, name, text FROM chunks WHERE id IN ({marks})", list(ranked))}
     wants_tests = any("test" in t for t in terms)
+    wants_prose = any(t in PROSE_WORDS for t in terms)
     scores = {}
     for cid, row in rows.items():
         shown = index.display(row["path"])
@@ -89,8 +97,13 @@ def _rescore(index, ranked: dict, terms: list[str]) -> tuple[dict, dict]:
                              split_identifiers(shown))).lower()
         coverage = sum(1 for t in terms if t in haystack) / len(terms) if terms else 1.0
         weight = MIN_COVERAGE_WEIGHT + (1 - MIN_COVERAGE_WEIGHT) * coverage
+        name = f"{row['name']} {split_identifiers(row['name'])}".lower()
+        if terms and row["name"] and all(t in name for t in terms):
+            weight *= NAME_BONUS
         if not wants_tests and TEST_PATH.search(shown):
             weight *= TEST_PENALTY
+        if not wants_prose and PROSE_PATH.search(shown):
+            weight *= PROSE_PENALTY
         scores[cid] = ranked[cid] * weight
     return scores, rows
 

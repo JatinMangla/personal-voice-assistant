@@ -284,3 +284,17 @@ def test_default_roots(monkeypatch, tmp_path):
     assert service.default_roots(tmp_path) == [tmp_path]
     monkeypatch.setenv("CODER_ALLOWED_DIRS", os.pathsep.join([str(tmp_path / "a"), str(tmp_path / "b")]))
     assert service.default_roots(tmp_path) == [tmp_path / "a", tmp_path / "b"]
+
+
+def test_an_answer_rated_bad_is_never_served_from_the_cache(tmp_path):
+    f = tmp_path / "a.py"
+    f.write_text("x = 1\n")
+    c = cache_mod.Cache(tmp_path / "c.db")
+    first = c.put("ask_repo", "q", "wrong answer", [f])
+    assert c.get("ask_repo", "q")["id"] == first
+    c.rate(first, "bad")
+    assert c.get("ask_repo", "q") is None            # asked again instead of repeating it
+    second = c.put("ask_repo", "q", "right answer", [f])
+    assert c.get("ask_repo", "q") == {"id": second, "answer": "right answer"}
+    c.rate(second, "good")
+    assert c.get("ask_repo", "q")["id"] == second    # a good answer still comes back

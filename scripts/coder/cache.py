@@ -30,10 +30,13 @@ class Cache:
         self.conn.executescript(SCHEMA)
 
     def get(self, task: str, question: str) -> dict | None:
-        """{'id', 'answer'} if the same question was answered and none of its files changed."""
+        """{'id', 'answer'} if the same question was answered, none of its files changed, and the
+        answer was not rated bad (a bad answer must never come back from the cache)."""
         with self.lock:
-            row = self.conn.execute("SELECT * FROM answers WHERE key=? ORDER BY id DESC LIMIT 1",
-                                    (_key(task, question),)).fetchone()
+            row = self.conn.execute(
+                "SELECT a.* FROM answers a LEFT JOIN ratings r ON r.answer_id = a.id "
+                "WHERE a.key = ? AND COALESCE(r.verdict, '') != 'bad' ORDER BY a.id DESC LIMIT 1",
+                (_key(task, question),)).fetchone()
         if not row:
             return None
         for path, digest in json.loads(row["files"]).items():
