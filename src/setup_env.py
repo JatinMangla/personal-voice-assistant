@@ -149,16 +149,24 @@ def _link_cached_llm(cache: Path | None, models_dir: Path) -> bool:
 
 
 _ollama_models_dir: Path | None = None
+_ollama_launch: dict = {}  # gpus / extra_env of the last start, so a restart keeps them
 
 
-def start_ollama(models_dir: Path | None = None) -> None:
+def start_ollama(models_dir: Path | None = None, gpus: str | None = None,
+                 extra_env: dict[str, str] | None = None) -> None:
+    """Start `ollama serve`. gpus/extra_env: the coder helper uses both GPUs and its own
+    cache settings; Jarvis keeps GPU 0 for the LLM (GPU 1 is for speech)."""
     global _ollama_models_dir
     _ollama_models_dir = models_dir or _ollama_models_dir
+    if gpus or extra_env:
+        _ollama_launch.update(gpus=gpus, extra_env=extra_env)
+    gpus = gpus or _ollama_launch.get("gpus")
+    extra_env = extra_env or _ollama_launch.get("extra_env")
     # The online installer may start its own Ollama service; ours needs the port.
     subprocess.run("systemctl stop ollama 2>/dev/null; pkill -f 'ollama serve'; true", shell=True)
     time.sleep(1)
     env = {**os.environ,
-           "CUDA_VISIBLE_DEVICES": config.OLLAMA_GPU,
+           "CUDA_VISIBLE_DEVICES": gpus or config.OLLAMA_GPU,
            "OLLAMA_MODELS": str(_ollama_models_dir),
            "OLLAMA_KEEP_ALIVE": "60m",
            "OLLAMA_MAX_LOADED_MODELS": "2",  # base + fine-tuned during the A/B test
@@ -169,7 +177,8 @@ def start_ollama(models_dir: Path | None = None) -> None:
            # older cards like the T4 it can be slower. Try it via config and compare
            # the [turn] speed lines.
            "OLLAMA_FLASH_ATTENTION": "1" if config.OLLAMA_FLASH_ATTENTION else "0",
-           "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://")}
+           "OLLAMA_HOST": config.OLLAMA_URL.removeprefix("http://"),
+           **(extra_env or {})}
     subprocess.Popen(["ollama", "serve"], env=env,
                      stdout=open(config.WORK_DIR / "ollama.log", "a"), stderr=subprocess.STDOUT)
     for _ in range(60):

@@ -11,3 +11,4 @@ requests
 tzdata
 soundfile
 cbor2
+mcp   # only to run scripts/coder_mcp.py (the coder tools for Claude Code); tests don't need it

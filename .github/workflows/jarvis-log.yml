@@ -8,6 +8,9 @@ on:
       lines:
         description: "How many log lines to show"
         default: "200"
+      notebook:
+        description: "Which notebook's last run to show: empty = Jarvis, or type coder"
+        default: ""
 
 permissions:
   contents: read
@@ -26,4 +29,4 @@ jobs:
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || vars.KAGGLE_USERNAME }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
-          JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
+          JARVIS_NOTEBOOK: ${{ inputs.notebook || vars.JARVIS_NOTEBOOK || 'jarvis' }}

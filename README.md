@@ -228,6 +228,50 @@ The app and the page show minutes used today and when memory was last saved.
 
 ---
 
+## Coder helper: a coding model for Claude Code (optional, free)
+
+A second AI on Kaggle that only does coding chores for Claude Code, so Claude reads less and uses fewer tokens: it answers questions about the code, shortens long logs and files, and drafts small pieces of code (which Claude then checks). It runs **instead of** Jarvis: same ngrok address, same free GPU hours, one at a time.
+
+**What works without Kaggle (already, nothing to set up):** Claude Code has a local code search and a "repo map" (`search_code`, `repo_map`, `summarize` for logs). They use no GPU and no internet.
+
+**What the Kaggle model adds:** `ask_repo` (answers with file:line references), real summaries, `draft_code`, search by meaning, and a one-line description of every file.
+
+**Models:** `qwen3-coder:30b` (19 GB; a "mixture of experts": 30B knowledge but only 3B active per word, so it is fast; split over both T4 GPUs). If it can't start, the run uses `qwen2.5-coder:14b` (9 GB) by itself. Small helper models: `qwen3-embedding:0.6b` (meaning search) and Qwen3-Reranker-0.6B (picks the best code pieces). The log prints the real speed of the run (`[coder] speed: reading ... writing ...`): please paste it so we can compare the two models.
+
+### One-time setup (about 15 minutes)
+
+1. **Make a key** (on this laptop, in this folder): `.venv\Scripts\python scripts\make_key.py`. Copy the printed text. This is your `CODER_KEY`; save it in your password manager too. It is the only thing that lets anyone use the Coder.
+2. **GitHub secret:** repo → **Settings → Secrets and variables → Actions → New repository secret** → name `CODER_KEY` → paste the key → **Add secret**. (The other secrets are the same ones Jarvis uses; they are already there.)
+3. **Start it:** GitHub app or github.com → your repo → **Actions → Start Coder → Run workflow → Run workflow**. If Jarvis is running it refuses (close Jarvis first). About 5–8 minutes later the Kaggle log shows `[ready]`. (Read it without opening Kaggle: **Actions → Jarvis log → Run workflow**, type `coder` in the *notebook* box.)
+4. **Tell Claude Code the key** (this laptop, no admin needed): press the Windows key, type **environment variables**, open **Edit environment variables for your account**, under **User variables** click **New** → name `CODER_KEY`, value = your key → **OK**. Then close and reopen VS Code. (The address is already set to your ngrok domain in `.mcp.json`; set a `CODER_URL` variable too only if the domain ever changes.)
+5. **Check:** in Claude Code run `/mcp`: `coder` should be connected. Ask Claude to run `coder_status`: it says `Coder: online` while the Kaggle run is up and `offline (press Start Coder)` otherwise.
+
+The Coder stops by itself after **20 minutes without a request** (and after 3 hours, or at 99 % of any free limit). Its GPU time is added to the same counters as Jarvis, so the Start buttons and the limit guard stay correct.
+
+### Use it directly in VS Code (chat with the model yourself)
+
+Install the free **Continue** extension, open its config (`config.yaml`) and add:
+```yaml
+models:
+  - name: Jarvis Coder
+    provider: openai
+    model: jarvis-coder
+    apiBase: https://<your ngrok domain>/v1
+    apiKey: <your CODER_KEY>
+    requestOptions:
+      headers:
+        ngrok-skip-browser-warning: "1"
+```
+
+### Safety (what to know)
+
+- Only the folders in `CODER_ALLOWED_DIRS` (default: this repository) are ever read, and never secret files (`.env`, `*.enc`, keystores, `kaggle.json`, names containing `secret`/`password`...). **Do not add office/company folders** unless your company allows sending that code to Kaggle (Google) and ngrok.
+- The model's answers are treated as untrusted. `draft_code` never writes files; it shows a draft after checking paths, syntax and lint. Running the project's tests on a draft is **off** by default (it would run model-written code on this PC); turn it on with the user variable `CODER_RUN_TESTS=1` if you want it. It runs in a temporary copy, never in your real files.
+- The link needs the key: ngrok rejects requests without an `Authorization` header, and the proxy checks the key (10 wrong keys in 15 minutes lock out wrong keys). Only chat and embeddings are forwarded; nothing can pull, create or delete models through it.
+- Logs show timings and sizes only, never your code or the answers.
+
+---
+
 ## Security: what is protected and what isn't
 
 | Threat | Protected? |

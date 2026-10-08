@@ -41,17 +41,29 @@ def traffic_policy(allowed_emails: list[str], bridge_path: bool = False,
     return {"on_http_request": [oauth, deny]}
 
 
+def coder_traffic_policy() -> dict:
+    """The coder helper's link (coder_proxy.py): no Google sign-in, because editors and
+    scripts can't do one. ngrok itself turns away any request without an Authorization
+    header (nothing reaches the notebook); the proxy then checks the key. Two layers, like
+    the app header (gotcha 29): keep both rules identical."""
+    return {"on_http_request": [{
+        "expressions": ["!('authorization' in req.headers)"],
+        "actions": [{"type": "deny", "config": {"status_code": 401}}]}]}
+
+
 def start(authtoken: str, domain: str, allowed_emails: list[str] | None,
-          bridge_path: bool = False) -> subprocess.Popen:
+          bridge_path: bool = False, coder: bool = False) -> subprocess.Popen:
     """Start the ngrok agent. Without allowed_emails there is no Google sign-in
-    and the app's own password page (fallback mode) protects it instead."""
+    and the app's own password page (fallback mode) protects it instead.
+    coder=True: the coder helper's policy (Authorization header required) instead."""
     domain = domain.removeprefix("https://").removeprefix("http://").strip("/")
     binary = NGROK_BIN if os.path.exists(NGROK_BIN) else (shutil.which("ngrok") or NGROK_BIN)
     args = [binary, "http", f"{config.APP_HOST}:{config.APP_PORT}",
             "--url", f"https://{domain}", "--log", "stdout", "--log-format", "json"]
-    if allowed_emails:
+    if coder or allowed_emails:
+        policy = coder_traffic_policy() if coder else traffic_policy(allowed_emails, bridge_path)
         policy_file = config.WORK_DIR / "ngrok-policy.json"
-        policy_file.write_text(json.dumps(traffic_policy(allowed_emails, bridge_path)))
+        policy_file.write_text(json.dumps(policy))
         args += ["--traffic-policy-file", str(policy_file)]
 
     log_path = config.WORK_DIR / "ngrok.log"

@@ -255,6 +255,14 @@ def main() -> None:
             "the tab, and press Start again.\n"
             "- Otherwise an older run is stuck: press 'Run workflow' again with 'force' ticked.")
 
+    coder = f"{s['user']}/{os.environ.get('CODER_NOTEBOOK', 'coder').strip()}"
+    coder_status = None if force else kaggle("kernels", "status", coder)
+    if coder_status and coder_status.returncode == 0 and is_running(coder_status.stdout):
+        sys.exit("The Coder helper is running, so NOTHING was started. Jarvis and the Coder "
+                 "share one address and one memory file. Wait for the Coder to close (20 minutes "
+                 "without a request) or stop it on Kaggle, then press Start again. "
+                 "('force' ticked skips this check.)")
+
     blocked = limit_blocker(s["user"], secrets["MEMORY_KEY"])
     if blocked:
         sys.exit(blocked)

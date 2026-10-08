@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "coder": {
+      "command": ".venv/Scripts/python.exe",
+      "args": ["scripts/coder_mcp.py"],
+      "env": {
+        "CODER_URL": "${CODER_URL:-https://volley-gnarly-constable.ngrok-free.dev}",
+        "CODER_KEY": "${CODER_KEY:-}"
+      }
+    }
+  }
+}

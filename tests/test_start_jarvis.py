@@ -94,6 +94,7 @@ def fake_kaggle_calls(env, answers):
 def test_full_start_uploads_secrets_then_pushes_and_retries(env):
     calls = fake_kaggle_calls(env, [
         (0, 'jatinmangla123/jarvis has status "KernelWorkerStatus.COMPLETE"'),  # kernel status
+        (1, "404 - Not Found"),                                    # the Coder helper: none yet
         (1, "404 - Not Found"),                                    # usage numbers (none yet)
         (0, "ready"),                                                            # secrets exist?
         (0, "Dataset version is being created."),                               # upload
@@ -102,11 +103,11 @@ def test_full_start_uploads_secrets_then_pushes_and_retries(env):
         (0, "Kernel version 12 successfully pushed."),                          # push 2
     ])
     start_jarvis.main()
-    assert [c[:2] for c in calls] == [("kernels", "status"), ("datasets", "download"),
-                                      ("datasets", "status"),
+    assert [c[:2] for c in calls] == [("kernels", "status"), ("kernels", "status"),
+                                      ("datasets", "download"), ("datasets", "status"),
                                       ("datasets", "version"), ("datasets", "status"),
                                       ("kernels", "push"), ("kernels", "push")]
-    assert "--delete-old-versions" in calls[3]
+    assert "--delete-old-versions" in calls[4]
 
 
 def test_already_running_and_reachable_does_nothing(env):
@@ -206,7 +207,7 @@ def test_unreadable_usage_lets_the_notebook_decide(env):
 
 def test_main_stops_when_limit_is_used_up(env):
     env.setattr(start_jarvis, "limit_blocker", lambda user, key: "NOT started: used up.")
-    calls = fake_kaggle_calls(env, [(0, 'has status "KernelWorkerStatus.COMPLETE"')])
+    calls = fake_kaggle_calls(env, [(0, 'has status "KernelWorkerStatus.COMPLETE"'), (1, "404")])
     with pytest.raises(SystemExit, match="NOT started"):
         start_jarvis.main()
-    assert len(calls) == 1  # nothing uploaded, nothing pushed
+    assert len(calls) == 2  # only the two status checks: nothing uploaded, nothing pushed

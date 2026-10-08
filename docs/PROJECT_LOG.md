@@ -423,6 +423,26 @@ run on Kaggle or a device yet.
   Devanagari spellings (प्ले, सजेस्ट, सॉन्ग्स, म्यूजिक, प्राइस …) and made video search read
   YouTube's own results page first (ddgs videos as backup; DuckDuckGo often rate-limits).
 
+- 2026-10-09: **Coder helper, step 1** (plan: a Kaggle coding model that cuts Claude Code's
+  token use; step 1 needs no Kaggle). `scripts/coder/` = code index (SQLite FTS5 per
+  function/class/section, identifiers split so "silence detector" finds `SilenceDetector`),
+  search (keywords + symbol names, RRF, scaled by how many query words a chunk holds, tests
+  pushed down), answer cache keyed by file hashes (never stale), good/bad ratings, safety
+  (allowlist folders, secret files never read). `scripts/coder_mcp.py` serves it to Claude
+  Code as MCP tools (`search_code`, `repo_map`, `rate`, `coder_status`, `reindex`), registered in
+  `.mcp.json`. MCP is version 2.x (`mcp.server.mcpserver.MCPServer`, not `FastMCP`). This repo:
+  134 files / 1.5k chunks index in ~1 s, searches take ~3 ms. 37 tests in `tests/test_coder.py`.
+- 2026-10-09 (same day): **Coder helper, steps 2-3** built. Kaggle side: `src/coder_main.py` (budget
+  check, refuses while Jarvis runs, Ollama on both GPUs + KV cache q8_0 + flash attention, 30B with 14B
+  fallback, alias `jarvis-coder`, speed probe in the log, reranker, usage recorder, idle/3 h/limit stop),
+  `coder_proxy.py` (Bearer key, 3 paths, forced model/context/reply cap, `/rerank`), `coder_rerank.py`,
+  `tunnel.coder_traffic_policy`, `notebooks/coder.ipynb`, `scripts/start_coder.py`, `start-coder.yml`;
+  Start Jarvis now also refuses while the Coder runs; the log button takes a `notebook` input.
+  Laptop side: `client`, `tasks`, `selfcheck`, vectors in the index, reranked deep search, `ask_repo`,
+  `summarize` (offline reducer), `draft_code`, idle pre-compute. 527 tests (client <-> proxy integration
+  test included). Found while testing: ngrok counts every request, so the proxy now counts all of them.
+  Not run on Kaggle yet.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

@@ -1,0 +1,37 @@
+# The "Start Coder" button: a coding model on Kaggle's free GPU for Claude Code. It runs
+# INSTEAD of Jarvis (same address and GPU hours), so close Jarvis first.
+# GitHub app (or github.com) -> this repo -> Actions -> Start Coder -> Run workflow.
+name: Start Coder
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Start a new run even if Kaggle says the Coder or Jarvis is already running"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -q kaggle cryptography
+      - run: python scripts/start_coder.py
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || vars.KAGGLE_USERNAME }}
+          KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          MEMORY_KEY: ${{ secrets.MEMORY_KEY }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
+          NGROK_DOMAIN: ${{ secrets.NGROK_DOMAIN }}
+          CODER_KEY: ${{ secrets.CODER_KEY }}
+          CODER_NOTEBOOK: ${{ vars.CODER_NOTEBOOK || 'coder' }}
+          JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
+          CODER_FORCE_START: ${{ inputs.force }}

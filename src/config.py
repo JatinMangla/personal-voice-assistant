@@ -65,6 +65,29 @@ SEARCH_RESULTS = 5
 SCREEN_MAX_BYTES = 3_000_000
 SCREEN_MAX_AGE_SEC = 90  # a snapshot older than this is not used
 
+# --- Coder helper (coder_main.py): a coding model for Claude Code, run INSTEAD of Jarvis ----
+# One Kaggle run at a time (same ngrok address, same free GPU hours). Tags checked on
+# ollama.com on 2026-10-09: qwen3-coder:30b = 19 GB (mixture of experts, 3B active),
+# qwen2.5-coder:14b = 9 GB, qwen3-embedding:0.6b = 0.6 GB.
+CODER_MODEL = os.environ.get("PVA_CODER_MODEL", "qwen3-coder:30b")
+CODER_FALLBACK_MODEL = "qwen2.5-coder:14b"
+CODER_ALIAS = "jarvis-coder"             # every client request is answered by this one model
+CODER_EMBED_MODEL = "qwen3-embedding:0.6b"
+CODER_RERANK_REPO = "Qwen/Qwen3-Reranker-0.6B"
+CODER_CONTEXT_TOKENS = 32768             # one fixed num_ctx for every request (like rule 6)
+CODER_MAX_REPLY_TOKENS = 1200
+CODER_GPUS = "0,1"                       # the 30B model is split over both T4s
+CODER_FLASH_ATTENTION = True             # needed for the smaller KV cache below; compare [coder] speed lines
+CODER_KV_CACHE_TYPE = "q8_0"             # half the memory of the long context, almost no quality loss
+CODER_IDLE_MIN = 20                      # no request for this long -> the run ends (frees GPU hours)
+CODER_MAX_SESSION_MIN = 180              # hard cap for one run
+CODER_USAGE_EVERY_MIN = 30               # GPU time is recorded this often (a killed run is not lost)
+CODER_MAX_BODY_BYTES = 2_000_000
+CODER_FAILS_BEFORE_LOCKOUT = 10          # wrong keys within CODER_LOCKOUT_MIN -> 429 for wrong keys
+CODER_LOCKOUT_MIN = 15
+CODER_NOTEBOOK_SLUG = os.environ.get("CODER_NOTEBOOK", "coder")
+JARVIS_NOTEBOOK_SLUG = os.environ.get("JARVIS_NOTEBOOK", "jarvis")  # Coder refuses to start while it runs
+
 KOKORO_REPO = "hexgrad/Kokoro-82M"
 # language code -> (Kokoro lang_code, voice)
 TTS_VOICES = {
