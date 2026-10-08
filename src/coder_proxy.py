@@ -149,7 +149,7 @@ def prepare_embed(body: dict) -> dict | None:
 
 
 def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transport=None,
-               ready=lambda: True) -> FastAPI:
+               ready=lambda: True, warning=lambda: None) -> FastAPI:
     """rerank: callable(query, [documents]) -> [scores] or None (then /rerank answers 503).
     transport: lets tests replace the connection to Ollama."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -179,7 +179,8 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
     @app.get("/health")
     async def health():
         return {"model": config.CODER_ALIAS, "ready": bool(ready()), "rerank": rerank is not None,
-                "idle_seconds": int(state.idle_seconds()), "context": config.CODER_CONTEXT_TOKENS}
+                "idle_seconds": int(state.idle_seconds()), "context": config.CODER_CONTEXT_TOKENS,
+                "limit_warning": warning()}   # None, else {meter, label, percent, minutes_left, resets, text}
 
     @app.get("/v1/models")
     async def models():

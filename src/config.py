@@ -81,6 +81,7 @@ CODER_FLASH_ATTENTION = True             # needed for the smaller KV cache below
 CODER_KV_CACHE_TYPE = "q8_0"             # half the memory of the long context, almost no quality loss
 CODER_IDLE_MIN = 20                      # no request for this long -> the run ends (frees GPU hours)
 CODER_MAX_SESSION_MIN = 180              # hard cap for one run
+CODER_WARN_MIN_LEFT = 30                 # warn once under this many Coder minutes are left today
 CODER_USAGE_EVERY_MIN = 30               # GPU time is recorded this often (a killed run is not lost)
 CODER_MAX_BODY_BYTES = 2_000_000
 CODER_FAILS_BEFORE_LOCKOUT = 10          # wrong keys within CODER_LOCKOUT_MIN -> 429 for wrong keys

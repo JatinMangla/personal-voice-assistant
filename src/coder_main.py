@@ -65,6 +65,36 @@ def speed_report(resp: dict) -> str:
             f"writing {rate('eval_count', 'eval_duration')}")
 
 
+NAMES = {"day": "today's GPU time", "week": "the GPU time of the last 7 days",
+         "requests": "this month's free link requests", "data": "this month's free link data"}
+
+
+def limit_warning(meters, now, elapsed_s: float = 0.0) -> dict | None:
+    """What to tell the user about the free limits, or None while there is plenty left. The
+    tightest meter wins. `minutes_left` counts to the automatic stop, and for GPU-time meters the
+    Coder's own session cap is counted too, so the number never promises more than it can give."""
+    if not meters:
+        return None
+    from budget import describe_reset, minutes_until_stop
+    worst = max(meters, key=lambda m: m.fraction)
+    left = minutes_until_stop(worst, config.STOP_AT)
+    if left is None:                                     # link meters: no minutes, only a percentage
+        if worst.fraction < config.NOTIFY_AT:
+            return None
+        left_minutes = None
+    else:
+        session_left = max(0, int(config.CODER_MAX_SESSION_MIN - elapsed_s / 60))
+        left_minutes = min(left, session_left)
+        if worst.fraction < config.NOTIFY_AT and left_minutes > config.CODER_WARN_MIN_LEFT:
+            return None
+    return {"meter": worst.name, "label": NAMES.get(worst.name, worst.name),
+            "percent": worst.percent, "minutes_left": left_minutes,
+            "resets": describe_reset(worst, now),
+            "text": (f"{NAMES.get(worst.name, worst.name)} is at {worst.percent}% of the free limit"
+                     + (f"; about {left_minutes} min of Coder time left today" if left_minutes is not None else "")
+                     + f". It stops itself at {config.STOP_AT:.0%}. {describe_reset(worst, now)}")}
+
+
 def stop_reason(idle_s: float, elapsed_s: float, over_limit: str | None) -> str | None:
     """Why the run should end now, or None."""
     if over_limit:
@@ -182,15 +212,26 @@ def other_run_active(username: str, env: dict, slug: str) -> bool:
     return result.returncode == 0 and kernel_active(result.stdout)
 
 
-def watchdog(state, recorder, server, started: float, over_limit_of) -> None:
-    """Every 5 s: end the run when idle, past the session cap, or at a free limit."""
+def watchdog(state, recorder, server, started: float, over_limit_of, warning: dict | None = None) -> None:
+    """Every 5 s: end the run when idle, past the session cap, or at a free limit. Every usage
+    record also refreshes the limit warning that /health publishes, and says it once in the log."""
     last_record = time.time()
     over_limit = None
+    announced: set[str] = set()
     while not server.should_exit:
         time.sleep(5)
         if time.time() - last_record >= config.CODER_USAGE_EVERY_MIN * 60:
             last_record = time.time()
-            over_limit = over_limit_of(recorder.record())
+            meters = recorder.record()
+            over_limit = over_limit_of(meters)
+            if warning is not None:
+                warning.clear()
+                note = limit_warning(meters, now_ist(), time.time() - started) if meters else None
+                if note:
+                    warning.update(note)
+                    if note["meter"] not in announced:   # once per meter: the log stays readable
+                        announced.add(note["meter"])
+                        print(f"[coder] free-limit warning: {note['text']}")
         reason = stop_reason(state.idle_seconds(), time.time() - started, over_limit)
         if reason:
             print(f"[coder] stopping: {reason}")
@@ -291,7 +332,13 @@ def _run(ctx: dict, started: float) -> None:
     import uvicorn
     import tunnel
     from coder_proxy import create_app
-    app = create_app(coder_key, config.OLLAMA_URL, state, rerank=reranker)
+    warning: dict = {}
+    first = limit_warning(meters, now, time.time() - started)
+    if first:
+        warning.update(first)
+        print(f"[coder] free-limit warning: {first['text']}")
+    app = create_app(coder_key, config.OLLAMA_URL, state, rerank=reranker,
+                     warning=lambda: dict(warning) or None)
     server = uvicorn.Server(uvicorn.Config(app, host=config.APP_HOST, port=config.APP_PORT,
                                            log_level="warning", access_log=False))
     server_thread = threading.Thread(target=server.run, daemon=True)
@@ -310,7 +357,7 @@ def _run(ctx: dict, started: float) -> None:
         over = budget.over_stop(meters) if meters else None
         return over.name if over else None
 
-    threading.Thread(target=watchdog, args=(state, recorder, server, started, over_limit_of),
+    threading.Thread(target=watchdog, args=(state, recorder, server, started, over_limit_of, warning),
                      daemon=True).start()
     try:
         while server_thread.is_alive():

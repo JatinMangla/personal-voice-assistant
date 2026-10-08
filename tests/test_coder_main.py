@@ -209,3 +209,90 @@ def test_reranker_that_cannot_load_gives_none_not_an_error(monkeypatch, capsys):
     monkeypatch.setattr(config, "CODER_RERANK_REPO", "does/not-exist")
     assert coder_rerank.load("cpu") is None
     assert "no reranker" in capsys.readouterr().out
+
+
+# --- free-limit warning (owner's request: tell me before it stops) --------------------------------
+def meters(day_fraction=0.0, requests_fraction=0.0):
+    from budget import Meter
+    return [Meter("day", config.DAILY_LIMIT_MIN * 60 * day_fraction, config.DAILY_LIMIT_MIN * 60),
+            Meter("requests", config.NGROK_MONTHLY_REQUESTS * requests_fraction, config.NGROK_MONTHLY_REQUESTS)]
+
+
+NOW = datetime(2026, 10, 9, 20, 0, tzinfo=IST)
+
+
+def test_no_warning_while_there_is_plenty_left():
+    assert coder_main.limit_warning(meters(day_fraction=0.2), NOW) is None
+    assert coder_main.limit_warning([], NOW) is None
+
+
+def test_warning_once_the_day_is_above_the_notify_level():
+    note = coder_main.limit_warning(meters(day_fraction=0.92), NOW)
+    assert note["meter"] == "day" and note["percent"] == 92
+    assert "today's GPU time is at 92%" in note["text"] and "stops itself at 99%" in note["text"]
+    assert "midnight" in note["text"].lower() and note["minutes_left"] < 25
+
+
+def test_warning_when_little_time_is_left_even_below_the_notify_level():
+    # 90% of the day used is under the 90% notify level in fraction terms, but only ~25 min remain
+    note = coder_main.limit_warning(meters(day_fraction=0.895), NOW)
+    assert note and note["minutes_left"] <= config.CODER_WARN_MIN_LEFT
+    assert "min of Coder time left today" in note["text"]
+
+
+def test_the_session_cap_never_promises_more_time_than_it_can_give():
+    nearly_over = (config.CODER_MAX_SESSION_MIN - 4) * 60
+    note = coder_main.limit_warning(meters(day_fraction=0.1), NOW, elapsed_s=nearly_over)
+    assert note and note["minutes_left"] == 4            # the 3-hour cap, not the day's remainder
+
+
+def test_the_tightest_meter_is_the_one_reported():
+    note = coder_main.limit_warning(meters(day_fraction=0.5, requests_fraction=0.95), NOW)
+    assert note["meter"] == "requests" and "free link requests" in note["text"]
+    assert note["minutes_left"] is None                  # link meters have no minutes
+    assert "October" in note["text"] or "November" in note["text"]
+
+
+def test_the_watchdog_publishes_the_warning_and_logs_it_once(monkeypatch, capsys):
+    class Server:
+        should_exit = False
+
+    class Recorder:
+        def record(self):
+            return meters(day_fraction=0.93)
+    monkeypatch.setattr(coder_main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(config, "CODER_USAGE_EVERY_MIN", 0)
+    state = coder_proxy.ProxyState()
+    server, warning = Server(), {}
+    ticks = [0]
+
+    def over_limit_of(ms):
+        ticks[0] += 1
+        if ticks[0] >= 3:
+            server.should_exit = True                    # end the loop after a few rounds
+        return None
+    coder_main.watchdog(state, Recorder(), server, coder_main.time.time(), over_limit_of, warning)
+    assert warning["meter"] == "day" and "93%" in warning["text"]
+    assert capsys.readouterr().out.count("free-limit warning") == 1   # said once, not every tick
+
+
+def test_health_publishes_the_warning_and_the_client_passes_it_on():
+    import httpx
+    from fastapi.testclient import TestClient
+    note = {"meter": "day", "label": "today's GPU time", "percent": 94, "minutes_left": 12,
+            "resets": "Resets at midnight.", "text": "today's GPU time is at 94%; about 12 min left."}
+    live = {}
+    app = coder_proxy.create_app("k" * 43, "http://o.test", coder_proxy.ProxyState(),
+                                 transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})),
+                                 warning=lambda: dict(live) or None)
+    http = TestClient(app)
+    assert http.get("/health", headers={"Authorization": "Bearer " + "k" * 43}).json()["limit_warning"] is None
+
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent / "scripts"))
+    from coder.client import CoderClient
+    client = CoderClient("http://testserver", "k" * 43, http=http)
+    assert client.online() and client.warning_line() == ""
+    live.update(note)
+    assert client.online()
+    assert client.warning_line() == "\nFree limit: today's GPU time is at 94%; about 12 min left."

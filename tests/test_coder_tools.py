@@ -44,6 +44,10 @@ class FakeClient:
     def link_status(self):
         return "online" if self.up else "offline (press Start Coder)"
 
+    def warning_line(self, check=False):
+        note = getattr(self, "warning", None)
+        return "\nFree limit: " + note if note else ""
+
     def chat(self, messages, schema=None, max_tokens=800, background=False):
         self.chats.append(messages)
         if not self.up:

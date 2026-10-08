@@ -461,6 +461,14 @@ run on Kaggle or a device yet.
   checks and background-marked requests don't count as use; pre-computing does nothing (no request)
   when there is nothing left to compute. 544 tests.
 
+- 2026-10-09 (owner's request: "tell me before it ends for today"): the Coder already stopped at 99 %
+  of a limit, but silently. Added `coder_main.limit_warning()`: the tightest meter, its percentage,
+  the minutes of Coder time really left (the 3-hour session cap counted too, so the number never
+  promises more than it can give) and the reset time in IST. Published on `/health`, picked up by the
+  laptop client on every health check (no extra request) and appended to `ask_repo`, `summarize` and
+  `coder_status` as "Free limit: ..."; the Kaggle log says it once per meter. Warns at 90 % of a meter
+  OR under 30 min left (`CODER_WARN_MIN_LEFT`), so a near-empty day warns even below 90 %. 558 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

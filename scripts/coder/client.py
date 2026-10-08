@@ -85,6 +85,7 @@ class CoderClient:
         self._rerank_missing = False
         self.key = key
         self.last_done_reason: str | None = None   # "length" = the last answer was cut off
+        self.limit_warning: dict | None = None     # what /health last said about the free limits
 
     def fingerprint(self) -> str:
         """Same as the `[coder] key fingerprint` line in the Kaggle log (SHA-256, 8 characters)."""
@@ -123,10 +124,25 @@ class CoderClient:
         return resp
 
     def online(self, background: bool = False) -> bool:
+        """Also picks up the Coder's free-limit warning, so the tools can pass it on."""
         try:
-            return self._call("GET", "/health", background=background).status_code == 200
+            resp = self._call("GET", "/health", background=background)
+            if resp.status_code == 200:
+                try:
+                    note = resp.json().get("limit_warning")
+                except ValueError:
+                    note = None
+                self.limit_warning = note if isinstance(note, dict) else None
+            return resp.status_code == 200
         except (Offline, CoderError):
             return False
+
+    def warning_line(self, check: bool = False) -> str:
+        """One line to append to an answer, or "". check=True asks the Coder first (one request)."""
+        if check:
+            self.online()
+        note = self.limit_warning
+        return "\nFree limit: " + note["text"] if note and note.get("text") else ""
 
     def link_status(self) -> str:
         """One line for `coder_status`: online, refused (with the key fingerprint) or offline."""

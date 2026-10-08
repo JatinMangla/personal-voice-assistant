@@ -148,7 +148,7 @@ class Coder:
             return text + "\n(not cached; check the code or ask again with other words)"
         files = [Path(h["file"]) for h in hits]
         answer_id = self.cache.put("ask_repo", question, text, files)
-        return f"{text}\n(answer #{answer_id}; rate it with the rate tool)"
+        return f"{text}\n(answer #{answer_id}; rate it with the rate tool)" + self._warning()
 
     @staticmethod
     def _chunks_for(question: str) -> int:
@@ -232,7 +232,7 @@ class Coder:
         if data.get("cut"):
             body += "\n(the answer was cut at the length limit: ask a narrower question for the rest)"
         answer_id = self.cache.put("summarize", key, body, [file_path] if file_path else [])
-        return f"{body}\n(answer #{answer_id}; rate it with the rate tool)"
+        return f"{body}\n(answer #{answer_id}; rate it with the rate tool)" + self._warning()
 
     @staticmethod
     def _reduced(text: str, why: str) -> str:
@@ -284,6 +284,10 @@ class Coder:
         return text + (f"\n(answer #{answer_id}; rate it with the rate tool)" if answer_id else "")
 
     # --- housekeeping -----------------------------------------------------------------------
+    def _warning(self) -> str:
+        """The Coder's free-limit warning, from the last health check (no extra request)."""
+        return self.client.warning_line() if self.client else ""
+
     def rate(self, answer_id: int, verdict: str) -> str:
         if self.cache.rate(answer_id, verdict.strip().lower()):
             return f"Rated answer {answer_id}: {verdict.strip().lower()}."
@@ -300,6 +304,7 @@ class Coder:
         text = (f"Index: {s['files']} files, {s['chunks']} chunks, {summaries} file summaries, "
                 f"{self.index.vector_coverage():.0%} with meaning vectors. Coder: {link}. Folders: "
                 + ", ".join(str(r) for r in self.index.roots))
+        text += self.client.warning_line() if self.client else ""   # link_status() just refreshed it
         if ratings:
             text += "\nAnswers: " + "; ".join(
                 f"{task} {v['answers']} (good {v['good']}, bad {v['bad']})" for task, v in sorted(ratings.items()))
