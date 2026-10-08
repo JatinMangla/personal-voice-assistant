@@ -13,6 +13,7 @@ GPU machine is started), with these differences:
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -23,6 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import start_jarvis as sj  # noqa: E402
 
+KEY_CHARS = re.compile(r"[A-Za-z0-9_=-]+")   # what make_key.py prints (URL-safe base64)
 REQUIRED = ["KAGGLE_USERNAME", "KAGGLE_API_TOKEN", "MEMORY_KEY", "NGROK_AUTHTOKEN",
             "NGROK_DOMAIN", "CODER_KEY"]
 OPTIONAL = ["CODER_FORCE"]
@@ -37,7 +39,8 @@ def settings() -> dict:
 
 
 def collect_secrets(force: bool = False) -> dict:
-    values = {n: os.environ.get(n, "").strip() for n in REQUIRED + OPTIONAL}
+    # "\ufeff" is the invisible byte-order mark that PowerShell can put in front of piped text
+    values = {n: os.environ.get(n, "").strip().lstrip("\ufeff").strip() for n in REQUIRED + OPTIONAL}
     missing = [n for n in REQUIRED if not values[n]]
     if missing:
         sys.exit("These GitHub repository secrets are missing: " + ", ".join(missing) + "\n"
@@ -46,6 +49,10 @@ def collect_secrets(force: bool = False) -> dict:
                  "printed text (keep a copy in your password manager).")
     if len(values["CODER_KEY"]) < MIN_KEY_LENGTH:
         sys.exit("CODER_KEY is too short to be safe. Make one with: python scripts/make_key.py")
+    if not KEY_CHARS.fullmatch(values["CODER_KEY"]):
+        sys.exit("CODER_KEY contains a character that make_key.py never prints (a hidden or "
+                 "special character, often from copy and paste). Set the secret again with exactly "
+                 "the text from: python scripts/make_key.py")
     if force:
         values["CODER_FORCE"] = "1"      # the notebook then skips its own 'Jarvis is running' check
     return {k: v for k, v in values.items() if v}

@@ -40,6 +40,9 @@ class FakeClient:
     def online(self):
         return self.up
 
+    def link_status(self):
+        return "online" if self.up else "offline (press Start Coder)"
+
     def chat(self, messages, schema=None, max_tokens=800):
         self.chats.append(messages)
         if not self.up:
@@ -465,3 +468,39 @@ def test_status_reports_the_coder_link(repo, tmp_path):
     assert "Coder: not set up" in make(repo, tmp_path / "a", None).status()
     assert "Coder: online" in make(repo, tmp_path / "b", FakeClient()).status()
     assert "Coder: offline" in make(repo, tmp_path / "c", FakeClient(online=False)).status()
+
+
+# --- key fingerprint and refused keys ------------------------------------------------------------
+def test_fingerprint_matches_the_one_the_kaggle_side_prints():
+    import coder_main
+    key = "k" * 43 + "="
+    assert CoderClient("https://x.test", key).fingerprint() == coder_main.key_fingerprint(key)
+    assert len(coder_main.key_fingerprint(key)) == 8 and key not in coder_main.key_fingerprint(key)
+    assert coder_main.key_fingerprint(key) != coder_main.key_fingerprint(key + "x")
+
+
+def test_a_refused_key_is_not_retried_for_a_minute_and_says_how_to_compare():
+    now = [0.0]
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        return httpx.Response(429, json={"error": "too many wrong keys, try later"})
+    c = client_with(handler, clock=lambda: now[0])
+    with pytest.raises(CoderError, match="fingerprint " + c.fingerprint()):
+        c.chat([])
+    for _ in range(5):
+        assert c.online() is False
+    assert len(calls) == 1                                   # no hammering the proxy with the wrong key
+    now[0] += client_mod.REFUSED_MEMORY_SEC + 1
+    assert c.online() is False and len(calls) == 2
+
+
+def test_status_tells_a_refused_key_from_an_offline_coder(repo, tmp_path):
+    refused = client_with(lambda r: httpx.Response(401, json={}))
+    text = make(repo, tmp_path / "a", refused).status()
+    assert "REFUSED the key" in text and refused.fingerprint() in text
+    down = client_with(lambda r: (_ for _ in ()).throw(httpx.ConnectError("x")))
+    assert "offline (press Start Coder; key fingerprint here" in make(repo, tmp_path / "b", down).status()
+    up = client_with(lambda r: httpx.Response(200, json={}))
+    assert "online (key fingerprint" in make(repo, tmp_path / "c", up).status()

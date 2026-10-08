@@ -4,6 +4,7 @@ Needs CODER_URL (https://<your ngrok domain>) and CODER_KEY in the environment. 
 is not running the answer is `Offline` within a few seconds (remembered for 30 s), so the tools
 fall back at once instead of waiting.
 """
+import hashlib
 import os
 import re
 import time
@@ -12,6 +13,7 @@ import httpx
 
 ALIAS = "jarvis-coder"
 OFFLINE_MEMORY_SEC = 30.0
+REFUSED_MEMORY_SEC = 60.0   # after a refused key, don't ask again for a while (no hammering)
 CONNECT_TIMEOUT = 4.0
 READ_TIMEOUT = 300.0     # a long answer from a big model takes a while
 
@@ -49,7 +51,14 @@ class CoderClient:
             timeout=httpx.Timeout(READ_TIMEOUT, connect=CONNECT_TIMEOUT))
         self.headers = {"Authorization": f"Bearer {key}", "ngrok-skip-browser-warning": "1"}
         self._offline_until = 0.0
+        self._refused_until = 0.0
+        self._refused_text = ""
         self._rerank_missing = False
+        self.key = key
+
+    def fingerprint(self) -> str:
+        """Same as the `[coder] key fingerprint` line in the Kaggle log (SHA-256, 8 characters)."""
+        return hashlib.sha256(self.key.encode()).hexdigest()[:8]
 
     @classmethod
     def from_env(cls) -> "CoderClient | None":
@@ -59,6 +68,8 @@ class CoderClient:
     def _call(self, method: str, path: str, **kwargs) -> httpx.Response:
         if self.clock() < self._offline_until:
             raise Offline("the Coder is offline")
+        if self.clock() < self._refused_until:
+            raise CoderError(self._refused_text)
         try:
             resp = self.http.request(method, self.url + path, headers=self.headers, **kwargs)
         except httpx.TransportError as e:   # connect errors, timeouts, resets
@@ -68,10 +79,14 @@ class CoderClient:
                                                     and path != "/rerank"):  # 503 there = no reranker
             self._offline_until = self.clock() + OFFLINE_MEMORY_SEC
             raise Offline("the Coder is offline (nothing is connected to the address)")
-        if resp.status_code in (401, 403):
-            raise CoderError("the Coder refused the key: CODER_KEY here must equal the CODER_KEY secret")
-        if resp.status_code == 429:
-            raise CoderError("the Coder is locked for a while after wrong keys")
+        if resp.status_code in (401, 403, 429):
+            self._refused_text = (
+                f"the Coder refused the key (here: fingerprint {self.fingerprint()}; compare it with the "
+                "`[coder] key fingerprint` line in the Kaggle log). CODER_KEY here must equal the "
+                "CODER_KEY GitHub secret" + (" (it is also locked for a few minutes after wrong keys)"
+                                               if resp.status_code == 429 else ""))
+            self._refused_until = self.clock() + REFUSED_MEMORY_SEC
+            raise CoderError(self._refused_text)
         return resp
 
     def online(self) -> bool:
@@ -79,6 +94,14 @@ class CoderClient:
             return self._call("GET", "/health").status_code == 200
         except (Offline, CoderError):
             return False
+
+    def link_status(self) -> str:
+        """One line for `coder_status`: online, refused (with the key fingerprint) or offline."""
+        if self.online():
+            return f"online (key fingerprint {self.fingerprint()})"
+        if self.clock() < self._refused_until:
+            return f"reachable but it REFUSED the key. {self._refused_text}"
+        return f"offline (press Start Coder; key fingerprint here {self.fingerprint()})"
 
     def chat(self, messages: list[dict], schema: dict | None = None, max_tokens: int = 800) -> str:
         body = {"model": ALIAS, "messages": messages, "stream": False,

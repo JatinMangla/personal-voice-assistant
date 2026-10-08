@@ -252,7 +252,7 @@ class Coder:
         if not self.client:
             link = "not set up (CODER_URL and CODER_KEY)"
         else:
-            link = "online" if self.client.online() else "offline (press Start Coder)"
+            link = self.client.link_status()
         summaries = self.index.conn.execute("SELECT COUNT(*) FROM files WHERE summary IS NOT NULL").fetchone()[0]
         text = (f"Index: {s['files']} files, {s['chunks']} chunks, {summaries} file summaries, "
                 f"{self.index.vector_coverage():.0%} with meaning vectors. Coder: {link}. Folders: "

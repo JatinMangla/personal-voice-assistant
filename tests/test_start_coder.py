@@ -150,3 +150,17 @@ def test_start_jarvis_ignores_a_coder_that_does_not_exist_yet(env):
     env.setattr(sj, "upload_secrets", lambda user, secrets: "RUNKEY")
     sj.main()
     assert any(c[:2] == ("kernels", "push") for c in calls)
+
+
+def test_a_byte_order_mark_in_front_of_the_key_is_removed(env):
+    clean = SECRETS["CODER_KEY"]
+    env.setenv("CODER_KEY", "\ufeff" + clean + "\r\n")
+    assert start_coder.collect_secrets()["CODER_KEY"] == clean
+
+
+@pytest.mark.parametrize("bad", ["x" * 20 + "\u200b" + "y" * 30, "a b " * 15, "k" * 40 + "!",
+                                 "k" * 40 + "\n" + "k" * 5])
+def test_a_key_with_hidden_or_odd_characters_is_refused_with_advice(env, bad):
+    env.setenv("CODER_KEY", bad)
+    with pytest.raises(SystemExit, match="hidden or special character"):
+        start_coder.collect_secrets()

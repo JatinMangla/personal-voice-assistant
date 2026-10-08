@@ -42,6 +42,13 @@ def ollama_env() -> dict[str, str]:
     return env
 
 
+def key_fingerprint(key: str) -> str:
+    """First 8 characters of the key's SHA-256: lets you compare the key here with the one on the
+    laptop (`coder_status` shows the same) without revealing it."""
+    import hashlib
+    return hashlib.sha256(key.encode()).hexdigest()[:8]
+
+
 def kernel_active(status_output: str) -> bool:
     """Does `kaggle kernels status` say the notebook is running or queued?"""
     text = status_output.lower()
@@ -290,7 +297,10 @@ def _run(ctx: dict, started: float) -> None:
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
     ngrok = tunnel.start(ngrok_token, ngrok_domain, None, coder=True)
+    state.touch()          # the idle clock starts now, not when the (long) start-up began
     print(f"\n[ready] in {time.time() - started:.0f}s")
+    print(f"[coder] key fingerprint {key_fingerprint(coder_key)} (length {len(coder_key)}); "
+          "`coder_status` on the laptop shows the same if the keys match")
     print(f"[ready]  -> https://{ngrok_domain.removeprefix('https://').strip('/')}  (coder: key required; model {model})")
     print(f"[ready] closes after {config.CODER_IDLE_MIN} min without a request, or at {config.STOP_AT:.0%} "
           "of any free limit\n")
