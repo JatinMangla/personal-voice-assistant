@@ -218,4 +218,31 @@ def test_every_request_counts_for_ngrok_but_wrong_keys_do_not_keep_the_run_alive
     client.get("/health", headers=auth("x" * 43))
     assert state.idle_seconds() >= 700                        # still idle: a wrong key is not activity
     client.get("/health", headers=auth())
+    assert state.idle_seconds() >= 700                        # nor is a health check (it only looks)
+    client.get("/v1/models", headers=auth())                  # a real request from the user's side
     assert state.idle_seconds() < 5
+
+
+def test_health_checks_and_background_requests_do_not_postpone_the_idle_stop(client, state):
+    """A laptop that merely stays open must not keep the (GPU-hour burning) run alive."""
+    state.last_request = state.now() - 1000
+    for _ in range(3):
+        assert client.get("/health", headers=auth()).status_code == 200
+    assert state.idle_seconds() >= 1000                       # looking at it is not using it
+    bg = {**auth(), "X-Coder-Background": "1"}
+    assert client.post("/api/embed", headers=bg, json={"input": ["a"]}).status_code == 200
+    assert client.post("/api/chat", headers=bg, json={"messages": []}).status_code == 200
+    assert client.post("/rerank", headers=bg, json={"query": "q", "documents": ["a"]}).status_code == 200
+    assert state.idle_seconds() >= 1000                       # housekeeping is not using it either
+    assert client.post("/api/embed", headers=auth(), json={"input": ["a"]}).status_code == 200
+    assert state.idle_seconds() < 5                           # a real request restarts the clock
+
+
+def test_a_background_request_in_progress_still_counts_as_busy():
+    clock = [0.0]
+    s = coder_proxy.ProxyState(now=lambda: clock[0])
+    clock[0] = 500
+    s.begin(background=True)
+    assert s.idle_seconds() == 0                              # busy while it runs
+    s.end(background=True)
+    assert s.idle_seconds() == 500                            # and the idle clock was not reset

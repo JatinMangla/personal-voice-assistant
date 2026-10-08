@@ -65,13 +65,16 @@ class CoderClient:
         url, key = os.environ.get("CODER_URL", "").strip(), os.environ.get("CODER_KEY", "").strip()
         return cls(url, key) if url and key else None
 
-    def _call(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def _call(self, method: str, path: str, background: bool = False, **kwargs) -> httpx.Response:
+        """background=True marks housekeeping calls: the Coder then does not count them as use, so
+        they can never keep the (GPU-hour burning) run alive past its idle stop."""
+        headers = {**self.headers, "X-Coder-Background": "1"} if background else self.headers
         if self.clock() < self._offline_until:
             raise Offline("the Coder is offline")
         if self.clock() < self._refused_until:
             raise CoderError(self._refused_text)
         try:
-            resp = self.http.request(method, self.url + path, headers=self.headers, **kwargs)
+            resp = self.http.request(method, self.url + path, headers=headers, **kwargs)
         except httpx.TransportError as e:   # connect errors, timeouts, resets
             self._offline_until = self.clock() + OFFLINE_MEMORY_SEC
             raise Offline(f"the Coder is not reachable ({type(e).__name__})") from e
@@ -89,9 +92,9 @@ class CoderClient:
             raise CoderError(self._refused_text)
         return resp
 
-    def online(self) -> bool:
+    def online(self, background: bool = False) -> bool:
         try:
-            return self._call("GET", "/health").status_code == 200
+            return self._call("GET", "/health", background=background).status_code == 200
         except (Offline, CoderError):
             return False
 
@@ -103,12 +106,13 @@ class CoderClient:
             return f"reachable but it REFUSED the key. {self._refused_text}"
         return f"offline (press Start Coder; key fingerprint here {self.fingerprint()})"
 
-    def chat(self, messages: list[dict], schema: dict | None = None, max_tokens: int = 800) -> str:
+    def chat(self, messages: list[dict], schema: dict | None = None, max_tokens: int = 800,
+             background: bool = False) -> str:
         body = {"model": ALIAS, "messages": messages, "stream": False,
                 "options": {"num_predict": max_tokens, "temperature": 0.2}}
         if schema:
             body["format"] = schema
-        resp = self._call("POST", "/api/chat", json=body)
+        resp = self._call("POST", "/api/chat", background=background, json=body)
         if resp.status_code != 200:
             raise CoderError(f"the coder answered with an error ({resp.status_code})")
         try:
@@ -116,8 +120,8 @@ class CoderClient:
         except (ValueError, KeyError, TypeError) as e:
             raise CoderError("the coder's reply was not understood") from e
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        resp = self._call("POST", "/api/embed", json={"input": texts})
+    def embed(self, texts: list[str], background: bool = False) -> list[list[float]]:
+        resp = self._call("POST", "/api/embed", background=background, json={"input": texts})
         if resp.status_code != 200:
             raise CoderError(f"embedding failed ({resp.status_code})")
         try:

@@ -455,6 +455,12 @@ run on Kaggle or a device yet.
   the prompt now says .md only describes the code. Also: an answer rated bad is never served from
   the cache again. After the fixes `ask_repo` answers in 7-9 s with real file:line refs. 538 tests.
 
+- 2026-10-09 (later): found while the Coder was up: the laptop's idle pre-computing polled `/health`
+  every 5 s and each request reset the Coder's idle timer, so with Claude Code open the Coder would
+  never have closed itself (GPU hours + ~17k ngrok requests/day against 20k/month). Fixed: health
+  checks and background-marked requests don't count as use; pre-computing does nothing (no request)
+  when there is nothing left to compute. 544 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

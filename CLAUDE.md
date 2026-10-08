@@ -292,6 +292,13 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
     even for github.com), use Python + httpx. (i) Ranking lesson: docs and tests restate code in the
     question's own words and so outrank it on keywords -- the penalties in `coder/search.py`
     (prose 0.6, tests 0.35) exist because both of the first live answers cited a README/tests.
+    (j) **Keep-alive bug (found 2026-10-09 while the Coder was running):** the laptop's idle
+    pre-computing asked `/health` every 5 s, and every authed request reset the Coder's 20-min
+    idle timer, so an open Claude Code would have kept the GPU running up to the 3 h cap and spent
+    ~17k ngrok requests/day. Rules now: `/health` and requests with `X-Coder-Background: 1` (all
+    pre-computing) never reset the idle clock; pre-computing checks what is left locally first and
+    sends NOTHING when there is nothing to do (looks again every 10 min; 5 min when offline).
+    Anything new that talks to the Coder in the background must set `background=True`.
 
 ## Status (2026-10-09): Coder helper WORKS on Kaggle (measured)
 - **Run 1 (version 1)** reached `[ready]` in 393 s: `qwen3-coder:30b` downloaded in 173 s, loaded in

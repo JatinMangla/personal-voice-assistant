@@ -59,15 +59,20 @@ class ProxyState:
         with self.lock:
             self.requests += 1
 
-    def begin(self) -> None:
+    def begin(self, background: bool = False) -> None:
+        """background=True: housekeeping (e.g. the laptop pre-computing file summaries). It keeps
+        the Coder 'busy' while it runs but does not push back the idle stop, otherwise a laptop
+        that merely stays open would keep the GPU running for hours."""
         with self.lock:
             self.busy += 1
-            self.last_request = self.now()
+            if not background:
+                self.last_request = self.now()
 
-    def end(self) -> None:
+    def end(self, background: bool = False) -> None:
         with self.lock:
             self.busy = max(0, self.busy - 1)
-            self.last_request = self.now()
+            if not background:
+                self.last_request = self.now()
 
     def take_traffic(self) -> tuple[int, int]:
         """(requests, bytes) since the last call, for the ngrok meters."""
@@ -85,6 +90,13 @@ class ProxyState:
             cutoff = self.now() - config.CODER_LOCKOUT_MIN * 60
             self.failures = [t for t in self.failures if t >= cutoff]
             return len(self.failures) >= config.CODER_FAILS_BEFORE_LOCKOUT
+
+
+BACKGROUND_HEADER = "x-coder-background"
+
+
+def is_background(request) -> bool:
+    return request.headers.get(BACKGROUND_HEADER) == "1"
 
 
 def bearer(header: str | None) -> str:
@@ -158,7 +170,10 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
             return JSONResponse({"error": "unauthorized"}, 401)
         if int(request.headers.get("content-length") or 0) > config.CODER_MAX_BODY_BYTES:
             return JSONResponse({"error": "request too big"}, 413)
-        state.touch()
+        # Real work keeps the Coder alive. A health check is only a look at it, and background
+        # housekeeping is not a person using it: neither may postpone the idle stop.
+        if request.url.path != "/health" and not is_background(request):
+            state.touch()
         return await call_next(request)
 
     @app.get("/health")
@@ -184,12 +199,13 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
 
     async def forward(request: Request, path: str, body: dict) -> Response:
         started, method = time.time(), request.method
-        state.begin()  # stays busy until the whole reply has been streamed
+        background = is_background(request)
+        state.begin(background)  # stays busy until the whole reply has been streamed
         try:
             req = upstream.build_request("POST", path, json=body)
             resp = await upstream.send(req, stream=True)
         except httpx.HTTPError:
-            state.end()
+            state.end(background)
             log(method, path, 502, started, 0)
             return JSONResponse({"error": "the coder model is not reachable"}, 502)
         content_type = resp.headers.get("content-type", "application/json")
@@ -203,7 +219,7 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
             finally:
                 await resp.aclose()
                 state.count(sent)
-                state.end()
+                state.end(background)
                 log(method, path, resp.status_code, started, sent)
 
         return StreamingResponse(pieces(), status_code=resp.status_code, media_type=content_type)
@@ -237,14 +253,15 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
         if rerank is None:
             return JSONResponse({"error": "no reranker on this run"}, 503)
         docs = [d[:MAX_RERANK_CHARS] for d in docs]
-        state.begin()
+        background = is_background(request)
+        state.begin(background)
         try:
             scores = await asyncio.get_running_loop().run_in_executor(None, rerank, query, docs)
         except Exception as e:  # the answer is only a better order; never fail the call hard
             log("POST", "/rerank", 500, started, 0)
             return JSONResponse({"error": f"rerank failed: {type(e).__name__}"}, 500)
         finally:
-            state.end()
+            state.end(background)
         out = json.dumps({"scores": [float(s) for s in scores]})
         state.count(len(out))
         log("POST", "/rerank", 200, started, len(out))

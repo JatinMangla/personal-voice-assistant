@@ -37,13 +37,14 @@ class FakeClient:
         self.replies, self.chats, self.up = list(replies), [], online
         self.embedder, self.scores, self.embedded = embedder, scores, []
 
-    def online(self):
+    def online(self, background=False):
+        self.online_calls = getattr(self, 'online_calls', 0) + 1
         return self.up
 
     def link_status(self):
         return "online" if self.up else "offline (press Start Coder)"
 
-    def chat(self, messages, schema=None, max_tokens=800):
+    def chat(self, messages, schema=None, max_tokens=800, background=False):
         self.chats.append(messages)
         if not self.up:
             raise Offline("offline")
@@ -52,7 +53,7 @@ class FakeClient:
             raise reply
         return reply if isinstance(reply, str) else json.dumps(reply)
 
-    def embed(self, texts):
+    def embed(self, texts, background=False):
         if not self.up:
             raise Offline("offline")
         self.embedded += texts
@@ -533,3 +534,53 @@ def test_a_name_that_matches_every_word_comes_first(repo, tmp_path):
         "def helper():\n    # start blocker start blocker start blocker\n    return 1\n" * 4)
     coder = make(repo, tmp_path, None)
     assert "start_blocker" in coder.search_code("start blocker").splitlines()[0]
+
+
+# --- the pre-computing must never keep the Coder (and the GPU) alive ----------------------------------
+def test_with_nothing_left_to_do_it_sends_no_request_and_waits_ten_minutes(repo, tmp_path, embedder):
+    fake = FakeClient([{"summary": "a"}, {"summary": "b"}, {"summary": "c"}], embedder=embedder)
+    coder = make(repo, tmp_path, fake)
+    p = pre(coder)
+    while p.step():                    # do all the work there is
+        pass
+    calls = (fake.online_calls, len(fake.embedded), len(fake.chats))
+    p.wait = 0
+    for _ in range(5):
+        assert p.step() is None
+    assert p.wait == precompute.IDLE_RECHECK_SEC
+    assert (fake.online_calls, len(fake.embedded), len(fake.chats)) == calls     # not one more request
+
+
+def test_when_the_coder_is_offline_it_waits_five_minutes_between_tries(repo, tmp_path, embedder):
+    coder = make(repo, tmp_path, FakeClient(online=False, embedder=embedder))
+    p = pre(coder)
+    assert p.step() is None and p.wait == precompute.OFFLINE_RECHECK_SEC
+
+
+def test_the_loop_waits_the_chosen_time_and_returns_to_normal_afterwards(repo, tmp_path, embedder):
+    coder = make(repo, tmp_path, FakeClient([{"summary": "a"}] * 5, embedder=embedder))
+    p = pre(coder)
+    waits = []
+    original = p.stopping.wait
+
+    def fake_wait(seconds):
+        waits.append(seconds)
+        return len(waits) > 3                       # stop after three rounds
+    p.stopping.wait = fake_wait
+    p._loop()
+    assert waits[0] == p.tick and set(waits) <= {p.tick, precompute.IDLE_RECHECK_SEC}
+
+
+def test_background_calls_carry_the_marker_and_foreground_calls_do_not():
+    seen = []
+
+    def handler(request):
+        seen.append(request.headers.get("x-coder-background"))
+        return httpx.Response(200, json={"message": {"content": "x"}, "embeddings": [[0.1]]})
+    c = client_with(handler)
+    c.online()
+    c.online(background=True)
+    c.chat([], background=True)
+    c.embed(["a"], background=True)
+    c.chat([])
+    assert seen == [None, "1", "1", "1", None]

@@ -76,9 +76,10 @@ def summarize(client, text: str, question: str = "") -> dict:
 
 
 def file_summary(client, path: str, text: str) -> str:
+    """One line about a file. Always background work (the idle pre-computing)."""
     user = (f'<file path="{path}">\n{shrink(text, 12_000)}\n</file>\n\n'
             "Describe in ONE line (at most 25 words) what this file is for.")
-    data = parse_json(client.chat(_messages(user), LINE_SCHEMA, max_tokens=80))
+    data = parse_json(client.chat(_messages(user), LINE_SCHEMA, max_tokens=80, background=True))
     return " ".join(str(data.get("summary", "")).split())[:200]
 
 
