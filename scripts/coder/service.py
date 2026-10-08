@@ -6,6 +6,7 @@ map, a log reducer for `summarize`, cached answers. The tools that need the mode
 """
 import hashlib
 import os
+import re
 import time
 from pathlib import Path
 
@@ -20,6 +21,11 @@ SNIPPET_LINES = 3
 MAP_FILE_LIMIT = 150
 MAP_SYMBOLS = 12
 ASK_CHUNKS = 6
+ASK_CHUNKS_WIDE = 14     # questions that trace a flow through many files need more of the code
+WIDE_WORDS = ("step by step", "trace", "end to end", "from the moment", "walk me through", "every file",
+              "all the files", "which files", "flow of")
+WIDE_MIN_WORDS = 30
+MAX_UNVERIFIED = 6
 DEEP_POOL = 30
 MIN_VECTOR_COVERAGE = 0.5
 MAX_READ_BYTES = 5_000_000
@@ -122,7 +128,7 @@ class Coder:
         if not self.client:
             return self._without_coder(question, "CODER_URL and CODER_KEY are not set. ")
         try:
-            hits = self._deep_search(question, ASK_CHUNKS)
+            hits = self._deep_search(question, self._chunks_for(question))
             if not hits:
                 return "No matching code found."
             result = tasks.ask(self.client, question, hits)
@@ -131,12 +137,47 @@ class Coder:
         except CoderError as e:
             return self._without_coder(question, f"The Coder could not answer ({e}). ")
         refs = self._valid_refs(result["refs"], hits)
+        unverified = self._unverified_names(result["answer"])
         text = f"{result['answer']}\nRefs: {', '.join(refs) or 'none given'}\nConfidence: {result['confidence']}"
-        if result["confidence"] == "low" or not result["answer"]:
-            return text + "\n(low confidence: not cached; check the code or ask again with other words)"
+        if unverified:
+            text += ("\nNot found anywhere in the indexed code (the model may have invented them; verify "
+                     "before relying on them): " + ", ".join(unverified))
+        if result.get("cut"):
+            text += "\n(the answer was cut at the length limit: ask about one part at a time for the rest)"
+        if result["confidence"] == "low" or not result["answer"] or unverified or result.get("cut"):
+            return text + "\n(not cached; check the code or ask again with other words)"
         files = [Path(h["file"]) for h in hits]
         answer_id = self.cache.put("ask_repo", question, text, files)
         return f"{text}\n(answer #{answer_id}; rate it with the rate tool)"
+
+    @staticmethod
+    def _chunks_for(question: str) -> int:
+        """Most questions need ~6 pieces of code. A long question, or one that asks to trace a flow
+        step by step, spans many files, and 6 pieces would force the model to guess the rest."""
+        low = question.lower()
+        wide = len(question.split()) >= WIDE_MIN_WORDS or any(w in low for w in WIDE_WORDS)
+        return ASK_CHUNKS_WIDE if wide else ASK_CHUNKS
+
+    def _unverified_names(self, answer: str) -> list[str]:
+        """Names the model put in `backticks` (functions, classes, modules) that do not exist
+        anywhere in the indexed code or file names. Cheap, and it catches the typical invention."""
+        candidates: list[str] = []
+        for span in re.findall(r"`([^`\n]{2,100})`", answer):
+            if "/" in span or " " in span.strip():
+                continue                                   # a path or a command, not a name
+            for part in span.replace("()", "").split("."):
+                if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{3,}", part) and part not in candidates:
+                    candidates.append(part)
+        missing = []
+        with self.index.lock:
+            for name in candidates:
+                found = self.index.conn.execute(
+                    "SELECT 1 FROM chunks WHERE instr(text, ?) > 0 OR instr(name, ?) > 0 LIMIT 1",
+                    (name, name)).fetchone() or self.index.conn.execute(
+                    "SELECT 1 FROM files WHERE instr(path, ?) > 0 LIMIT 1", (name,)).fetchone()
+                if not found:
+                    missing.append(name)
+        return missing[:MAX_UNVERIFIED]
 
     def _without_coder(self, question: str, why: str) -> str:
         hits = search_mod.search(self.index, question, ASK_CHUNKS)
@@ -188,6 +229,8 @@ class Coder:
         except CoderError as e:
             return self._reduced(text, f"The Coder could not summarize ({e}). ")
         body = data["summary"] + "".join(f"\n- {p}" for p in data["key_points"])
+        if data.get("cut"):
+            body += "\n(the answer was cut at the length limit: ask a narrower question for the rest)"
         answer_id = self.cache.put("summarize", key, body, [file_path] if file_path else [])
         return f"{body}\n(answer #{answer_id}; rate it with the rate tool)"
 

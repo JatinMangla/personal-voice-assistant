@@ -28,6 +28,8 @@ DRAFT_SCHEMA = {"type": "object", "required": ["files", "notes"], "properties": 
     "notes": {"type": "string"}}}
 LINE_SCHEMA = {"type": "object", "required": ["summary"], "properties": {"summary": {"type": "string"}}}
 
+SUMMARY_TOKENS = 1100     # the Coder's own cap is 1200: a "list every problem" answer needs room
+ASK_TOKENS = 1000
 MAX_LOG_CHARS = 60_000
 HEAD_LINES, TAIL_LINES = 80, 160
 INTERESTING = re.compile(r"error|exception|traceback|fail|fatal|warn|denied|timeout|killed|oom", re.I)
@@ -61,18 +63,22 @@ def ask(client, question: str, chunks: list[dict]) -> dict:
     """chunks: dicts with path, first, last, text. Returns {'answer','refs','confidence'}."""
     parts = [f'<file path="{c["path"]}" lines="{c["first"]}-{c["last"]}">\n{c["text"]}\n</file>' for c in chunks]
     user = "\n".join(parts) + f"\n\nQuestion: {question}\nAnswer from the files above."
-    data = parse_json(client.chat(_messages(user), ASK_SCHEMA, max_tokens=700))
+    data = parse_json(client.chat(_messages(user), ASK_SCHEMA, max_tokens=ASK_TOKENS))
     return {"answer": str(data.get("answer", "")).strip(),
             "refs": [str(r) for r in data.get("refs", [])][:12],
-            "confidence": data.get("confidence", "low")}
+            "confidence": data.get("confidence", "low"),
+            "cut": getattr(client, "last_done_reason", None) == "length"}
 
 
 def summarize(client, text: str, question: str = "") -> dict:
     task = question.strip() or "Summarize this. Name the most important facts, problems and numbers."
-    user = f"<log>\n{shrink(text)}\n</log>\n\nTask: {task}\nKeep the summary under 120 words."
-    data = parse_json(client.chat(_messages(user), SUMMARY_SCHEMA, max_tokens=500))
+    user = (f"<log>\n{shrink(text)}\n</log>\n\nTask: {task}\n"
+            "Keep the summary under 120 words. Put the details in key_points: at most 15, one short line "
+            "each (most important first), so the whole answer fits.")
+    data = parse_json(client.chat(_messages(user), SUMMARY_SCHEMA, max_tokens=SUMMARY_TOKENS))
     return {"summary": str(data.get("summary", "")).strip(),
-            "key_points": [str(p) for p in data.get("key_points", [])][:8]}
+            "key_points": [str(p) for p in data.get("key_points", [])][:15],
+            "cut": getattr(client, "last_done_reason", None) == "length"}
 
 
 def file_summary(client, path: str, text: str) -> str:

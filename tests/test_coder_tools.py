@@ -210,7 +210,8 @@ def test_ask_repo_cache_is_dropped_when_a_used_file_changes(repo, tmp_path):
 def test_low_confidence_answers_are_not_cached(repo, tmp_path):
     fake = FakeClient([{**ANSWER, "confidence": "low"}, ANSWER])
     coder = make(repo, tmp_path, fake)
-    assert "low confidence" in coder.ask_repo("which meter stops the start?")
+    assert "Confidence: low" in coder.ask_repo("which meter stops the start?")
+    assert coder.cache.get("ask_repo", "which meter stops the start?") is None
     assert "cached" not in coder.ask_repo("which meter stops the start?")
     assert len(fake.chats) == 2
 
@@ -584,3 +585,78 @@ def test_background_calls_carry_the_marker_and_foreground_calls_do_not():
     c.embed(["a"], background=True)
     c.chat([])
     assert seen == [None, "1", "1", "1", None]
+
+
+# --- long and complex tasks (found by the first long/complex benchmark, 2026-10-09) -------------------
+def test_json_cut_off_by_the_length_limit_is_repaired_not_lost():
+    from coder.client import repair_truncated_json
+    cut = '{"summary": "Three problems.", "key_points": ["CUDA out of memory", "Connection reset", "KeyError tok'
+    value = parse_json(cut)
+    assert value["summary"] == "Three problems." and value["key_points"][:2] == ["CUDA out of memory", "Connection reset"]
+    assert repair_truncated_json('{"a": [1, 2, {"b": "x') == {"a": [1, 2, {"b": "x"}]}
+    assert repair_truncated_json("not json") is None
+    assert repair_truncated_json('{"answer": "long text that never ends') == {"answer": "long text that never ends"}
+    with pytest.raises(CoderError):
+        parse_json("totally not json")
+
+
+def test_a_cut_off_summary_is_kept_and_marked(repo, tmp_path):
+    cut = '{"summary": "Found two problems.", "key_points": ["first problem", "second problem", "third prob'
+    fake = FakeClient([cut])
+    fake.last_done_reason = "length"
+    out = make(repo, tmp_path, fake).summarize("line\n" * 10 + "ERROR boom", "list every problem")
+    assert out.startswith("Found two problems.") and "- first problem" in out and "- second problem" in out
+    assert "cut at the length limit" in out
+
+
+def test_summaries_get_a_big_enough_output_budget():
+    assert tasks.SUMMARY_TOKENS >= 1000 and tasks.ASK_TOKENS >= 900
+    seen = {}
+
+    class Spy(FakeClient):
+        def chat(self, messages, schema=None, max_tokens=800, background=False):
+            seen["max"] = max_tokens
+            return json.dumps({"summary": "s", "key_points": []})
+    tasks.summarize(Spy(), "x", "q")
+    assert seen["max"] == tasks.SUMMARY_TOKENS
+
+
+def test_long_or_trace_questions_read_more_of_the_code():
+    c = service.Coder
+    assert c._chunks_for("where is the budget stop?") == service.ASK_CHUNKS
+    assert c._chunks_for("Trace what happens when the button is pressed") == service.ASK_CHUNKS_WIDE
+    assert c._chunks_for("walk me through the start-up") == service.ASK_CHUNKS_WIDE
+    assert c._chunks_for("word " * 40) == service.ASK_CHUNKS_WIDE
+
+
+def test_names_the_model_invented_are_flagged_and_the_answer_is_not_cached(repo, tmp_path):
+    answer = {"answer": "It calls `start_blocker` and then `kaggle.api.competitions.submissions_create()` "
+                        "using `src/budget.py`.", "refs": ["src/budget.py:1-6"], "confidence": "high"}
+    fake = FakeClient([answer, answer])
+    coder = make(repo, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert "Not found anywhere in the indexed code" in out
+    assert "competitions" in out and "submissions_create" in out
+    assert "start_blocker" not in out.split("Not found anywhere")[1]          # the real name is not flagged
+    assert "answer #" not in out
+    coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 2                                                # asked again: not cached
+
+
+def test_real_names_paths_and_commands_are_not_flagged(repo, tmp_path):
+    coder = make(repo, tmp_path, None)
+    coder.index.refresh()
+    text = "Run `python scripts/x.py`, see `src/budget.py`, call `start_blocker()` or `budget.over_stop` or `meters`."
+    assert coder._unverified_names(text) == []
+    assert coder._unverified_names("uses `totally_invented_helper()` and `Imaginary.thing`") == [
+        "totally_invented_helper", "Imaginary", "thing"]
+
+
+def test_a_wide_question_sends_more_pieces_to_the_model(repo, tmp_path):
+    for i in range(12):
+        (repo / "src" / f"mod{i}.py").write_text(f"def step_{i}():\n    return 'start button pressed {i}'\n")
+    fake = FakeClient([ANSWER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("Trace step by step what happens when the start button is pressed")
+    sent = "".join(m["content"] for m in fake.chats[0])
+    assert sent.count("<file path=") > service.ASK_CHUNKS

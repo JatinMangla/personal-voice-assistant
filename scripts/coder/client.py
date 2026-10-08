@@ -26,8 +26,34 @@ class CoderError(Exception):
     """The Coder answered, but not usefully (wrong key, bad reply)."""
 
 
+CLOSERS = ('"', '"}', '"]', '"]}', '"}]', '"}]}', ']', ']}', '}', '}]', '}]}')
+
+
+def repair_truncated_json(text: str):
+    """JSON that stops in the middle (the model hit its length limit while writing a long list):
+    close it at the last place that still makes sense, so the part that was written is not lost.
+    Returns the object, or None."""
+    import json
+    s = text.strip()
+    if not s.startswith("{"):
+        return None
+    for _ in range(200):
+        for closer in CLOSERS:
+            try:
+                value = json.loads(s + closer)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                return value
+        cut = max(s.rfind(","), s.rfind("{"))
+        if cut <= 0:
+            return None
+        s = s[:cut].rstrip()
+    return None
+
+
 def parse_json(text: str):
-    """The model's JSON, even if it wrapped it in a code fence or added a sentence."""
+    """The model's JSON, even if it wrapped it in a code fence, added a sentence, or was cut off."""
     import json
     text = text.strip()
     try:
@@ -40,6 +66,9 @@ def parse_json(text: str):
             return json.loads(candidate)
         except ValueError:
             continue
+    repaired = repair_truncated_json(fenced.group(1) if fenced else text[text.find("{"):])
+    if repaired is not None:
+        return repaired
     raise CoderError("the coder's answer was not valid JSON")
 
 
@@ -55,6 +84,7 @@ class CoderClient:
         self._refused_text = ""
         self._rerank_missing = False
         self.key = key
+        self.last_done_reason: str | None = None   # "length" = the last answer was cut off
 
     def fingerprint(self) -> str:
         """Same as the `[coder] key fingerprint` line in the Kaggle log (SHA-256, 8 characters)."""
@@ -116,7 +146,9 @@ class CoderClient:
         if resp.status_code != 200:
             raise CoderError(f"the coder answered with an error ({resp.status_code})")
         try:
-            return resp.json()["message"]["content"]
+            data = resp.json()
+            self.last_done_reason = data.get("done_reason")
+            return data["message"]["content"]
         except (ValueError, KeyError, TypeError) as e:
             raise CoderError("the coder's reply was not understood") from e
 
