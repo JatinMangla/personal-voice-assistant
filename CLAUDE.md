@@ -283,15 +283,38 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
     hence the cross-checks in both start scripts. (d) `draft_code` tests are OFF unless
     `CODER_RUN_TESTS=1` (it would run model-written code on the dev laptop). (e) Ollama tags verified
     2026-10-09: qwen3-coder:30b 19 GB, qwen2.5-coder:14b 9 GB, qwen3-embedding:0.6b 0.6 GB.
-    (f) Nothing of the Kaggle side has run yet: first run = read the `[coder]` lines (speed, GPU
-    list, reranker), expect to tune `CODER_KV_CACHE_TYPE` / flash attention.
+    (f) MEASURED on the first runs (see the status below): ready in 393 s, reading ~1242 tok/s,
+    writing ~66 tok/s on both T4s; `ask_repo` answers in 7-9 s. No need to tune
+    `CODER_KV_CACHE_TYPE` / flash attention so far. (g) `gh secret set X` **through a pipe adds a
+    BOM** from PowerShell, which silently broke the key: always `--body $value`. (h) Kaggle shows a
+    notebook's log only AFTER the run ends ("No log file came back" while RUNNING), so to watch a
+    live Coder poll `/health` through ngrok instead; `curl` in the Bash tool here is broken (exit 43
+    even for github.com), use Python + httpx. (i) Ranking lesson: docs and tests restate code in the
+    question's own words and so outrank it on keywords -- the penalties in `coder/search.py`
+    (prose 0.6, tests 0.35) exist because both of the first live answers cited a README/tests.
 
-## Status (2026-10-09): Coder helper built, NOT yet run on Kaggle
-- Built per the plan (index, search, cache, MCP tools, Kaggle notebook + proxy + tunnel mode, Start Coder,
-  reranker, vectors, self-check, idle pre-compute, usage recording); 527 tests pass. Owner steps are in the
-  README section "Coder helper" (make `CODER_KEY`, GitHub secret, press Start Coder, set the user
-  variable, `/mcp`). Then paste the `[coder]` log lines. Not built: speculative decoding, LoRA training
-  (only if ratings show a need), company folders (owner must confirm with their employer first).
+## Status (2026-10-09): Coder helper WORKS on Kaggle (measured)
+- **Run 1 (version 1)** reached `[ready]` in 393 s: `qwen3-coder:30b` downloaded in 173 s, loaded in
+  120 s (load 79 s), **reading ~1242 tok/s, writing ~66 tok/s** on `cuda: Tesla T4, cuda: Tesla T4`
+  (both GPUs), reranker ready on cuda:1 in 35 s, idle stop fired at 20 min, GPU time recorded
+  (next start said "GPU today 9% used"). Faster than the plan's estimate (35-50 tok/s writing), so
+  the 30B stays the default and the 14B fallback was never needed.
+- **Run 1 refused the correct key (429)**: the `CODER_KEY` secret had been piped in from PowerShell,
+  which prepends a BOM. Fixed: `start_coder` strips a BOM and refuses keys with characters
+  `make_key.py` never prints; both sides print an 8-char SHA-256 **key fingerprint** (Kaggle log /
+  `coder_status`) so a mismatch is obvious; the client remembers a refusal for 60 s. Set the secret
+  with `gh secret set CODER_KEY --body $key`, never a pipe.
+- **Run 2 works end to end**: `coder_status` says `online (key fingerprint ...)`, `ask_repo` answers
+  in **7-9 s** with real `file:line` refs, `summarize` is good. Both first live answers were wrong
+  for the same reason, now fixed: **ranking**. Prose (.md) and tests describe code in the question's
+  own words, so they beat it on keywords. `search.py` now scales prose by 0.6 and **tests by 0.35**,
+  lifts a chunk whose own name holds every query word by 1.6, and `tasks.SYSTEM` tells the model
+  that .md only describes the code. A cached answer rated **bad is never served again**.
+- Still unproven on Kaggle: `draft_code` end to end, meaning-vectors/reranked `deep` search with a
+  filled index, the idle pre-compute over a long session. Not built: speculative decoding, LoRA
+  training (only if ratings show a need), company folders (owner must confirm with their employer).
+- Owner steps are in the README section "Coder helper"; they still need to save `CODER_KEY` from the
+  Windows user variable into their password manager.
 
 ## Status (2026-10-01): read this first
 - **Android app built (plan phases 0-7), PWA removed.** Not yet run on a phone: next job is

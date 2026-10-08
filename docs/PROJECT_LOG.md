@@ -443,6 +443,18 @@ run on Kaggle or a device yet.
   test included). Found while testing: ngrok counts every request, so the proxy now counts all of them.
   Not run on Kaggle yet.
 
+- 2026-10-09 (first Kaggle runs of the Coder helper): **it works.** Run 1: ready in 393 s
+  (`qwen3-coder:30b` download 173 s, load 120 s), reading ~1242 tok/s, writing ~66 tok/s on both
+  T4s, reranker on cuda:1 in 35 s, 20-min idle stop fired, GPU time recorded correctly. Three
+  real bugs the run exposed, all fixed and pushed: (1) the correct key was refused (429) because
+  `gh secret set` through a PowerShell pipe prepends a BOM -> strip it, refuse keys with unexpected
+  characters, print an 8-char key fingerprint on both sides, remember a refusal for 60 s; (2) the
+  20-min idle clock started before the 6-minute start-up instead of at `[ready]`; (3) both first
+  live answers cited README.md/tests instead of the code, because prose and tests restate code in
+  the question's own words -> prose x0.6, tests x0.35, +1.6 for a chunk whose own name matches, and
+  the prompt now says .md only describes the code. Also: an answer rated bad is never served from
+  the cache again. After the fixes `ask_repo` answers in 7-9 s with real file:line refs. 538 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).
