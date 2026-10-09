@@ -728,3 +728,459 @@ def test_system_text_without_a_map_is_unchanged():
     assert tasks.system_text("") == tasks.SYSTEM
     assert tasks.system_text("   ") == tasks.SYSTEM
     assert tasks.system_text("src/x.py (3L): f").startswith(tasks.SYSTEM)
+
+
+# --- D: the model may ask for one more round of files --------------------------------------------
+NEEDY = {"answer": "", "refs": [], "confidence": "low", "need": ["src/helper.py"]}
+AFTER = {"answer": "start_blocker asks helper.over_limit first.",
+         "refs": ["src/helper.py:1-2"], "confidence": "high"}
+
+
+@pytest.fixture
+def repo_with_helper(repo):
+    (repo / "src" / "helper.py").write_text("def over_limit(m):\n    return m.used >= 5\n")
+    return repo
+
+
+@pytest.fixture
+def followup_on(monkeypatch):
+    """Experiment D is off by default (it lost on the benchmark), so its tests switch it on."""
+    monkeypatch.setenv("CODER_FOLLOWUP", "1")
+
+
+def test_the_model_can_ask_for_a_file_and_gets_a_second_round(repo_with_helper, tmp_path, followup_on):
+    fake = FakeClient([NEEDY, AFTER])
+    coder = make(repo_with_helper, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert "helper.over_limit" in out and len(fake.chats) == 2
+    first = fake.chats[0][1]["content"]
+    assert "in `need`" in first                                # the invitation was there
+    second = fake.chats[1][1]["content"]
+    assert "def over_limit" in second and "extra files you asked for" in second
+    assert "leave `need` empty" in second                       # it may not ask again
+    assert "it asked to read these too: src/helper.py" in out
+    assert "src/helper.py:1-2" in out                           # a fetched file is a valid ref
+
+
+def test_the_followup_is_capped_at_one_extra_round(repo_with_helper, tmp_path, followup_on):
+    """Even if the model asks again, there is no third call: the cost cannot run away."""
+    fake = FakeClient([NEEDY, {**NEEDY, "answer": "still unsure"}, AFTER])
+    out = make(repo_with_helper, tmp_path, fake).ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 2 and "still unsure" in out
+
+
+def test_a_followup_can_be_switched_off(repo_with_helper, tmp_path, monkeypatch):
+    monkeypatch.setenv("CODER_FOLLOWUP", "0")
+    fake = FakeClient([ANSWER])
+    coder = make(repo_with_helper, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 1
+    assert "in `need`" not in fake.chats[0][1]["content"]
+
+
+@pytest.mark.parametrize("wanted", ["../../outside.py", "/etc/passwd", ".env", "src/nope.py",
+                                    "C:/Windows/win.ini"])
+def test_a_file_the_model_asks_for_goes_through_the_safety_checks(repo, tmp_path, wanted, followup_on):
+    """It may name anything; only files inside the folders, and never secrets, are fetched."""
+    fake = FakeClient([{**NEEDY, "need": [wanted]}, ANSWER])
+    coder = make(repo, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert "it asked to read these too" not in out
+    assert len(fake.chats) == 2                                  # asked again without the file
+    assert "TOKEN=abc" not in "".join(m["content"] for m in fake.chats[1])
+    assert "in `need`" not in fake.chats[1][1]["content"]
+
+
+def test_a_file_already_shown_is_not_fetched_again(repo, tmp_path, followup_on):
+    fake = FakeClient([{**NEEDY, "need": ["src/budget.py"], "answer": "a partial answer"}])
+    coder = make(repo, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 1 and "a partial answer" in out    # nothing new to show
+    assert "it asked to read these too" not in out
+
+
+def test_too_many_requested_files_are_trimmed(repo, tmp_path, monkeypatch, followup_on):
+    for i in range(6):
+        (repo / "src" / f"m{i}.py").write_text(f"def f{i}():\n    return {i}\n")
+    wanted = [f"src/m{i}.py" for i in range(6)]
+    fake = FakeClient([{**NEEDY, "need": wanted}, AFTER])
+    coder = make(repo, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert out.count("src/m") <= tasks.MAX_NEED + 1
+    sent = fake.chats[1][1]["content"]
+    assert sum(f"src/m{i}.py" in sent for i in range(6)) <= tasks.MAX_NEED
+
+
+def test_a_huge_requested_file_is_cut_not_sent_whole(repo, tmp_path, followup_on):
+    (repo / "src" / "big.py").write_text("def f():\n    return 1\n" + "# filler\n" * 20_000)
+    fake = FakeClient([{**NEEDY, "need": ["src/big.py"]}, AFTER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    sent = fake.chats[1][1]["content"]
+    assert "file continues" in sent and len(sent) < service.FOLLOWUP_TOTAL_CHARS + 20_000
+
+
+def test_the_cache_goes_stale_when_a_fetched_file_changes(repo_with_helper, tmp_path, followup_on):
+    """The follow-up file is part of the answer, so editing it must drop the cached answer."""
+    fake = FakeClient([NEEDY, AFTER, NEEDY, {**AFTER, "answer": "now different"}])
+    coder = make(repo_with_helper, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    assert "(cached" in coder.ask_repo("which meter stops the start?")
+    (repo_with_helper / "src" / "helper.py").write_text("def over_limit(m):\n    return False\n")
+    assert "now different" in coder.ask_repo("which meter stops the start?")
+
+
+# --- A: house style for drafts, and the refs rule ------------------------------------------------
+def test_the_style_rules_are_sent_with_a_draft_and_can_be_switched_off(repo, tmp_path, monkeypatch):
+    fake = FakeClient([GOOD, GOOD])
+    coder = make(repo, tmp_path, fake)
+    coder.draft_code("add a function extra")
+    sent = fake.chats[0][1]["content"]
+    assert "A comment says WHY" in sent and "Args:/Returns:" in sent
+    assert "def minutes_until_stop" in sent              # the example, as there was no context file
+    monkeypatch.setenv("CODER_STYLE", "0")
+    coder.draft_code("add a function extra", fresh=True)
+    assert "A comment says WHY" not in fake.chats[1][1]["content"]
+
+
+def test_the_style_example_is_left_out_when_real_files_are_given(repo, tmp_path):
+    fake = FakeClient([GOOD])
+    make(repo, tmp_path, fake).draft_code("add extra", ["src/budget.py"])
+    sent = fake.chats[0][1]["content"]
+    assert "A comment says WHY" in sent and "def minutes_until_stop" not in sent
+    assert "def start_blocker" in sent                   # it copies the real file instead
+
+
+def test_the_system_prompt_demands_a_ref_it_was_really_shown():
+    assert "actually SHOWN" in tasks.SYSTEM
+    assert "repo map is only proof that the file exists" in tasks.SYSTEM
+
+
+# --- B: the draft writes and runs its own asserts ------------------------------------------------
+WITH_TEST = {**GOOD, "test": "from extra import extra\nassert extra() == 1\n"}
+WITH_BAD_TEST = {**GOOD, "test": "from extra import extra\nassert extra() == 99\n"}
+
+
+def test_a_draft_is_asked_for_its_own_test_and_it_is_run(repo, tmp_path):
+    fake = FakeClient([WITH_TEST])
+    out = make(repo, tmp_path, fake).draft_code("add a function extra")
+    assert "Also return `test`" in fake.chats[0][1]["content"]
+    assert "Self-test: the model's own asserts passed" in out and "Checks: passed" in out
+
+
+def test_a_failing_self_test_is_sent_back_to_be_fixed(repo, tmp_path):
+    fake = FakeClient([WITH_BAD_TEST, WITH_TEST])
+    out = make(repo, tmp_path, fake).draft_code("add a function extra")
+    assert len(fake.chats) == 2 and "Checks: passed" in out
+    assert "own test failed" in fake.chats[1][1]["content"]
+
+
+def test_the_self_test_can_be_switched_off(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("CODER_SELFTEST", "0")
+    fake = FakeClient([GOOD])
+    out = make(repo, tmp_path, fake).draft_code("add a function extra")
+    assert "Also return `test`" not in fake.chats[0][1]["content"]
+    assert "Self-test:" not in out
+
+
+def test_a_draft_without_a_test_still_passes(repo, tmp_path):
+    out = make(repo, tmp_path, FakeClient([GOOD])).draft_code("add a function extra")
+    assert "Checks: passed" in out and "Self-test:" not in out
+
+
+@pytest.mark.parametrize("hostile", [
+    "import os\nos.system('echo hi')\n",
+    "open('stolen.txt', 'w').write('x')\n",
+    "exec('print(1)')\n",
+    "import subprocess\n",
+    "__import__('socket')\n",
+])
+def test_a_self_test_that_touches_the_system_is_never_run(repo, tmp_path, hostile):
+    """The test comes from a model: anything but pure computation must be refused, not executed."""
+    fake = FakeClient([{**GOOD, "test": hostile}])
+    out = make(repo, tmp_path, fake).draft_code("add a function extra")
+    assert "self-test not run" in out
+    assert "Checks: passed" in out              # a refused test is not a failed draft
+    assert not (repo / "stolen.txt").exists() and not (tmp_path / "stolen.txt").exists()
+
+
+def test_a_self_test_is_refused_when_the_draft_itself_is_not_safe_to_import(repo, tmp_path):
+    draft = {"files": [{"path": "src/extra.py",
+                        "content": "import socket\n\n\ndef extra():\n    return 1\n"}],
+             "notes": "", "test": "from extra import extra\nassert extra() == 1\n"}
+    out = make(repo, tmp_path, FakeClient([draft])).draft_code("add extra")
+    assert "self-test not run" in out and "socket" in out
+
+
+def test_an_endless_self_test_is_stopped(repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(selfcheck, "SELFTEST_TIMEOUT_SEC", 2)
+    fake = FakeClient([{**GOOD, "test": "while True:\n    pass\n"}])
+    out = make(repo, tmp_path, fake).draft_code("add a function extra")
+    assert "self-test could not be run" in out and "Checks: passed" in out
+
+
+def test_unsafe_code_names_what_it_refused():
+    assert selfcheck.unsafe_code("x = 1\n") is None
+    assert selfcheck.unsafe_code("import re\nx = re.escape('a')\n") is None
+    assert "syntax error" in selfcheck.unsafe_code("def f(:\n")
+    assert "subprocess" in selfcheck.unsafe_code("import subprocess\n")
+    assert "open()" in selfcheck.unsafe_code("open('a')\n")
+
+
+def test_run_draft_test_needs_something_to_run():
+    assert selfcheck.run_draft_test({}, "assert True")[0] is None
+    assert selfcheck.run_draft_test({"a.py": "x = 1\n"}, "")[0] is None
+    assert selfcheck.run_draft_test({"a.md": "text"}, "assert True")[0] is None
+    assert selfcheck.run_draft_test({"a.py": "x = 1\n"}, "assert True\n" * 9000)[0] is None
+
+
+# --- E: a bad answer is remembered -------------------------------------------------------------
+def test_rating_bad_remembers_the_question_and_warns_the_next_time(repo, tmp_path):
+    fake = FakeClient([ANSWER, {**ANSWER, "answer": "the second answer"}])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    assert "Remembered" in coder.rate(1, "bad", "it is over_stop, not start_blocker")
+    out = coder.ask_repo("which meter stops the start now?")
+    sent = fake.chats[1][1]["content"]
+    assert "marked WRONG" in sent and "which meter stops the start?" in sent
+    assert "over_stop, not start_blocker" in sent
+    assert "the second answer" in out
+
+
+def test_a_good_rating_remembers_nothing(repo, tmp_path):
+    fake = FakeClient([ANSWER, ANSWER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    assert "Remembered" not in coder.rate(1, "good")
+    coder.cache.conn.execute("DELETE FROM answers")
+    coder.cache.conn.commit()
+    coder.ask_repo("which meter stops the start?")
+    assert "marked WRONG" not in fake.chats[1][1]["content"]
+
+
+def test_an_unrelated_question_is_not_warned(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("CODER_FOLLOWUP", "0")       # keep this about notes, one call per question
+    fake = FakeClient([ANSWER, ANSWER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    coder.rate(1, "bad", "wrong")
+    coder.ask_repo("what do the notes in the markdown file say?")
+    assert "marked WRONG" not in fake.chats[1][1]["content"]
+
+
+def test_notes_can_be_switched_off(repo, tmp_path, monkeypatch):
+    fake = FakeClient([ANSWER, ANSWER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    coder.rate(1, "bad", "wrong")
+    monkeypatch.setenv("CODER_NOTES", "0")
+    coder.ask_repo("which meter stops the start really?")
+    assert "marked WRONG" not in fake.chats[1][1]["content"]
+
+
+def test_notes_are_capped_and_newest_first(repo, tmp_path):
+    coder = make(repo, tmp_path, FakeClient([ANSWER] * 6))
+    for i in range(5):
+        coder.ask_repo(f"which meter stops the start variant {i}?")
+        coder.rate(i + 1, "bad", f"correction {i}")
+    notes = coder.cache.notes_for("ask_repo", "which meter stops the start?")
+    assert len(notes) == 3 and "correction 4" in notes[0]["correction"]
+
+
+def test_a_note_is_only_about_its_own_task(tmp_path):
+    from coder.cache import Cache
+    cache = Cache(tmp_path / "c.db")
+    aid = cache.put("ask_repo", "where is the budget meter", "an answer", [])
+    cache.rate(aid, "bad")
+    cache.add_note(aid, "wrong file")
+    assert cache.notes_for("ask_repo", "where is the budget meter")
+    assert cache.notes_for("draft_code", "where is the budget meter") == []
+    assert cache.add_note(999) is False
+
+
+# --- the agentic loop: investigate ---------------------------------------------------------------
+PLAN = {"steps": ["where is the start blocker decided", "what do the notes say about it"]}
+STEP1 = {"answer": "start_blocker returns the first used-up meter.",
+         "refs": ["src/budget.py:1-6"], "confidence": "high"}
+STEP2 = {"answer": "the notes only describe it.", "refs": ["src/notes.md:1-2"], "confidence": "medium"}
+FINAL = {"answer": "The start is blocked by start_blocker in src/budget.py.",
+         "refs": ["src/budget.py:1-6"], "confidence": "high"}
+
+
+def test_investigate_plans_answers_each_step_then_writes_one_answer(repo, tmp_path):
+    fake = FakeClient([PLAN, STEP1, STEP2, FINAL])
+    coder = make(repo, tmp_path, fake)
+    out = coder.investigate("trace how the start is blocked from the button to the meter")
+    assert len(fake.chats) == 4                         # plan + 2 steps + write-up
+    assert "The start is blocked by start_blocker" in out
+    assert "Looked at it in 2 steps:" in out
+    assert "where is the start blocker decided" in out  # the plan is shown, so the work is checkable
+    assert "src/budget.py:1-6" in out and "answer #1" in out
+    plan_prompt = fake.chats[0][1]["content"]
+    assert "INDEPENDENT sub-questions" in plan_prompt
+    writeup = fake.chats[3][1]["content"]
+    assert "What was found:" in writeup and "start_blocker returns" in writeup
+
+
+def test_each_step_gets_its_own_search(repo, tmp_path):
+    """The whole point: a step searches on its own, so it sees code the one-shot search misses."""
+    fake = FakeClient([PLAN, STEP1, STEP2, FINAL])
+    coder = make(repo, tmp_path, fake)
+    searched = []
+    original = coder._deep_search
+    coder._deep_search = lambda q, n: (searched.append(q), original(q, n))[1]
+    coder.investigate("trace the whole thing")
+    assert searched == PLAN["steps"]
+
+
+def test_investigate_is_capped_so_the_gpu_cost_cannot_run_away(repo, tmp_path):
+    many = {"steps": [f"where is the start blocker, question {i}" for i in range(20)]}
+    fake = FakeClient([many] + [STEP1] * 20 + [FINAL])
+    coder = make(repo, tmp_path, fake)
+    out = coder.investigate("a huge question", max_steps=2)
+    assert len(fake.chats) == 4                          # plan + 2 steps + write-up, never 20
+    assert "Looked at it in 2 steps:" in out
+
+
+def test_investigate_caps_at_the_module_limit_even_if_asked_for_more(repo, tmp_path):
+    many = {"steps": [f"where is the start blocker, question {i}" for i in range(20)]}
+    fake = FakeClient([many] + [STEP1] * 20 + [FINAL])
+    coder = make(repo, tmp_path, fake)
+    coder.investigate("a huge question", max_steps=99)
+    assert len(fake.chats) == tasks.MAX_STEPS + 2
+
+
+def test_a_step_that_finds_nothing_is_reported_not_invented(repo, tmp_path):
+    plan = {"steps": ["where is the quantum flux capacitor calibrated"]}
+    fake = FakeClient([plan, FINAL])
+    coder = make(repo, tmp_path, fake)
+    coder._deep_search = lambda q, n: []
+    out = coder.investigate("trace the flux capacitor")
+    assert "nothing found" in out and len(fake.chats) == 2     # plan + write-up, no step call
+    assert "no matching code was found" in fake.chats[1][1]["content"]
+
+
+def test_investigate_drops_refs_to_files_it_never_saw(repo, tmp_path):
+    fake = FakeClient([PLAN, STEP1, STEP2, {**FINAL, "refs": ["src/budget.py:1-6", "src/made_up.py:9"]}])
+    out = make(repo, tmp_path, fake).investigate("trace it")
+    assert "src/budget.py:1-6" in out and "src/made_up.py" not in out
+
+
+def test_investigate_caches_and_the_cache_goes_stale(repo, tmp_path):
+    fake = FakeClient([PLAN, STEP1, STEP2, FINAL,
+                       PLAN, STEP1, STEP2, {**FINAL, "answer": "a different answer"}])
+    coder = make(repo, tmp_path, fake)
+    coder.investigate("trace it")
+    assert "(cached" in coder.investigate("trace it") and len(fake.chats) == 4
+    (repo / "src" / "budget.py").write_text(PY + "\n# edited\n")
+    assert "a different answer" in coder.investigate("trace it")
+
+
+def test_investigate_does_not_cache_a_low_confidence_answer(repo, tmp_path):
+    fake = FakeClient([PLAN, STEP1, STEP2, {**FINAL, "confidence": "low"}])
+    out = make(repo, tmp_path, fake).investigate("trace it")
+    assert "not cached" in out and "answer #" not in out
+
+
+def test_investigate_offline_and_unset(repo, tmp_path):
+    offline = make(repo, tmp_path / "a", FakeClient(online=False)).investigate("trace it")
+    assert "offline" in offline.lower() and "Closest code instead" in offline
+    assert "not set" in make(repo, tmp_path / "b", None).investigate("trace it")
+    assert "Ask a question" in make(repo, tmp_path / "c", FakeClient([PLAN])).investigate("  ")
+
+
+def test_investigate_flags_names_it_invented(repo, tmp_path):
+    invented = {**FINAL, "answer": "It is done by `totally_made_up_function`."}
+    fake = FakeClient([PLAN, STEP1, STEP2, invented])
+    out = make(repo, tmp_path, fake).investigate("trace it")
+    assert "totally_made_up_function" in out and "may have invented them" in out
+    assert "not cached" in out
+
+
+def test_a_plan_the_model_returns_empty_falls_back_to_the_question(repo, tmp_path):
+    fake = FakeClient([{"steps": []}, STEP1, FINAL])
+    coder = make(repo, tmp_path, fake)
+    out = coder.investigate("where is the start blocker")
+    assert "Looked at it in 1 steps:" in out and "where is the start blocker" in out
+
+
+# --- D's real trigger: an answer that cites a file it was never shown ----------------------------
+BLUFF = {"answer": "The start is blocked, see the helper.", "refs": ["src/helper.py:1-2"],
+         "confidence": "high"}
+
+
+def test_citing_a_file_it_was_not_shown_fetches_it_and_asks_again(repo_with_helper, tmp_path, followup_on):
+    """Measured: the model answers cross-file questions at high confidence from the repo map and
+    cites files it never read. The citation is the evidence that it needed the file."""
+    fake = FakeClient([BLUFF, AFTER])
+    coder = make(repo_with_helper, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 2
+    assert "def over_limit" in fake.chats[1][1]["content"]     # the cited file was really fetched
+    assert "it asked to read these too: src/helper.py" in out
+    assert "helper.over_limit" in out
+
+
+def test_an_invented_citation_keeps_the_first_answer(repo, tmp_path, followup_on):
+    """With no repo map to check against, the model sometimes cites paths that do not exist. They
+    cannot be fetched, so the answer it already gave stands (with the bad ref stripped)."""
+    fake = FakeClient([{**BLUFF, "refs": ["src/does_not_exist.py:1"]}])
+    coder = make(repo, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 1                                # nothing to fetch, no second call
+    assert "The start is blocked" in out and "does_not_exist" not in out
+    assert "Refs: none given" in out
+
+
+def test_a_ref_to_a_shown_file_does_not_trigger_a_second_round(repo, tmp_path, followup_on):
+    fake = FakeClient([ANSWER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 1          # src/budget.py was shown; src/invented.py is not fetchable
+
+
+def test_the_bluff_trigger_is_off_with_the_followup_switch(repo_with_helper, tmp_path, monkeypatch):
+    monkeypatch.setenv("CODER_FOLLOWUP", "0")
+    fake = FakeClient([BLUFF])
+    coder = make(repo_with_helper, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 1
+
+
+def test_cited_but_unseen_only_returns_readable_files_inside_the_project(repo_with_helper, tmp_path):
+    coder = make(repo_with_helper, tmp_path, FakeClient())
+    hits = [{"path": "src/budget.py"}]
+    refs = ["src/budget.py:1-6", "src/helper.py:2", "../../outside.py:1", ".env:1",
+            "src/nope.py:4", "src/helper.py:9"]
+    assert coder._cited_but_unseen(refs, hits) == ["src/helper.py"]
+
+
+def test_the_followup_is_off_by_default(repo_with_helper, tmp_path):
+    """It lost on the benchmark (traces 27/30 -> 23/30 for 35% more time), so a plain install must
+    not pay for it: the model's `need` is ignored unless CODER_FOLLOWUP=1."""
+    fake = FakeClient([{**NEEDY, "answer": "answered without the extra file"}])
+    coder = make(repo_with_helper, tmp_path, fake)
+    out = coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 1 and "it asked to read these too" not in out
+    assert "in `need`" not in fake.chats[0][1]["content"]
+
+def test_an_optional_schema_field_is_never_filled_so_the_asked_for_ones_are_required():
+    """Measured 2026-10-09: Ollama's structured output fills exactly the fields in `required`.
+    With `test` (and `need`) only in `properties`, the model returned them NEVER, however firmly
+    the prompt asked, and both experiments looked inert. Keep them required."""
+    assert "test" in tasks.DRAFT_SCHEMA_WITH_TEST["required"]
+    assert "need" in tasks.ASK_SCHEMA_WITH_NEED["required"]
+    # and the plain schemas stay as they were, so a normal draft/answer is not forced to invent one
+    assert "test" not in tasks.DRAFT_SCHEMA["required"]
+    assert "need" not in tasks.ASK_SCHEMA["required"]
+
+
+def test_the_test_field_is_only_demanded_when_the_self_test_is_on(repo, tmp_path, monkeypatch):
+    fake = FakeClient([WITH_TEST])
+    make(repo, tmp_path, fake).draft_code("add a function extra")
+    monkeypatch.setenv("CODER_SELFTEST", "0")
+    fake2 = FakeClient([GOOD])
+    make(repo, tmp_path / "b", fake2).draft_code("add a function extra")
+    # the fake records messages, not schemas, so check the prompt that goes with each schema
+    assert "Also return `test`" in fake.chats[0][1]["content"]
+    assert "Also return `test`" not in fake2.chats[0][1]["content"]

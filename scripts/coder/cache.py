@@ -14,11 +14,25 @@ CREATE TABLE IF NOT EXISTS answers(
     id INTEGER PRIMARY KEY, key TEXT, task TEXT, question TEXT, answer TEXT, files TEXT, ts REAL);
 CREATE INDEX IF NOT EXISTS answers_key ON answers(key);
 CREATE TABLE IF NOT EXISTS ratings(answer_id INTEGER PRIMARY KEY, task TEXT, verdict TEXT, ts REAL);
+-- Experiment E: what a rated-bad answer taught us. Shown as a warning when a similar question
+-- comes back, so the same mistake is not made twice (learning without training).
+CREATE TABLE IF NOT EXISTS notes(
+    id INTEGER PRIMARY KEY, answer_id INTEGER, task TEXT, question TEXT, correction TEXT, ts REAL);
 """
+MAX_NOTES = 3                # at most this many warnings go into one prompt
+NOTE_WORDS_IGNORED = {"the", "a", "an", "is", "are", "of", "to", "in", "on", "for", "and", "or",
+                      "how", "what", "where", "which", "does", "do", "it", "this", "that", "with",
+                      "from", "by", "be", "why", "when", "who"}
+NOTE_MIN_OVERLAP = 0.34      # share of the new question's words a note must share to be shown
 
 
 def _key(task: str, question: str) -> str:
     return task + "|" + re.sub(r"\s+", " ", question.strip().lower())
+
+
+def _words(question: str) -> set:
+    """The meaningful words of a question, for matching one question against another."""
+    return {w for w in re.findall(r"[a-z0-9_]{2,}", question.lower()) if w not in NOTE_WORDS_IGNORED}
 
 
 class Cache:
@@ -64,6 +78,40 @@ class Cache:
                               (answer_id, row["task"], verdict, time.time()))
             self.conn.commit()
             return True
+
+    # --- notes from answers that were wrong (experiment E) --------------------------------
+    def add_note(self, answer_id: int, correction: str = "") -> bool:
+        """Remember that this answer was wrong, with an optional correction. Called when an answer
+        is rated bad, so a later similar question can be warned."""
+        with self.lock:
+            row = self.conn.execute("SELECT task, question FROM answers WHERE id=?",
+                                    (answer_id,)).fetchone()
+            if not row:
+                return False
+            self.conn.execute(
+                "INSERT INTO notes(answer_id, task, question, correction, ts) VALUES (?,?,?,?,?)",
+                (answer_id, row["task"], row["question"], correction.strip(), time.time()))
+            self.conn.commit()
+            return True
+
+    def notes_for(self, task: str, question: str, limit: int = MAX_NOTES) -> list[dict]:
+        """Past mistakes on questions close to this one, newest first. Closeness is plain word
+        overlap: it needs no model, so it also works while the Coder is offline."""
+        wanted = _words(question)
+        if not wanted:
+            return []
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT question, correction FROM notes WHERE task=? ORDER BY id DESC",
+                (task,)).fetchall()
+        out = []
+        for r in rows:
+            words = _words(r["question"])
+            if words and len(wanted & words) / len(wanted) >= NOTE_MIN_OVERLAP:
+                out.append({"question": r["question"], "correction": r["correction"]})
+            if len(out) >= limit:
+                break
+        return out
 
     def stats(self) -> dict:
         """Per task: how many answers, how many rated good / bad."""

@@ -20,6 +20,16 @@ MAX_FILES = 8
 MAX_FILE_CHARS = 120_000
 SKIP_COPY = shutil.ignore_patterns(*safety.SKIP_DIRS, "android", "*.zip", "*.apk", "*.enc")
 
+# Experiment B: the draft's OWN asserts are run, in a folder holding nothing but the draft. That is
+# model-written code, so the rules are the benchmark's: only these imports, no exec/eval/open/file
+# access, a short timeout, and only pure Python files. It is a behaviour check, not a build step.
+SELFTEST_IMPORTS = {"re", "math", "typing", "itertools", "collections", "string", "__future__",
+                    "unicodedata", "dataclasses", "functools", "operator", "enum", "datetime",
+                    "decimal", "fractions", "heapq", "bisect", "copy", "textwrap", "json"}
+SELFTEST_BANNED = {"exec", "eval", "open", "__import__", "compile", "input", "breakpoint"}
+SELFTEST_TIMEOUT_SEC = 25
+MAX_SELFTEST_CHARS = 4_000
+
 
 def target_path(path: str, roots: list[Path]) -> tuple[Path, Path] | None:
     """(root, absolute path) for a draft's relative path, or None if it is not allowed: absolute,
@@ -115,9 +125,73 @@ def run_tests(root: Path, files: dict[str, str]) -> str:
         return ("tests passed: " if result.returncode == 0 else "tests FAILED: ") + tail
 
 
-def check_draft(roots: list[Path], files: list[dict], run_tests_too: bool | None = None) -> dict:
-    """{'problems': [...], 'tests': str, 'clean': {relative path: content}}. 'clean' only has
-    files that passed the path rules. Problems are phrased so the model can fix them."""
+def unsafe_code(code: str, own_modules: set | None = None) -> str | None:
+    """Why this code may not be run (an import we do not allow, or exec/eval/open), or None.
+    Both the draft and the model's own test go through this before anything is executed.
+    `own_modules`: the draft's own module names, which the test has to be able to import."""
+    allowed = SELFTEST_IMPORTS | (own_modules or set())
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return f"syntax error on line {e.lineno}: {e.msg}"
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [a.name.split(".")[0] for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            modules = [node.module.split(".")[0]] if node.module and node.level == 0 else []
+        else:
+            modules = []
+        outside = [m for m in modules if m not in allowed]
+        if outside:
+            return f"imports {', '.join(outside)}, which the test sandbox does not allow"
+        name = getattr(node.func, "id", "") if isinstance(node, ast.Call) else ""
+        if name in SELFTEST_BANNED:
+            return f"calls {name}(), which the test sandbox does not allow"
+    return None
+
+
+def run_draft_test(files: dict[str, str], test: str) -> tuple[bool | None, str]:
+    """Run the asserts the model wrote for its own draft, in a throwaway folder holding only the
+    draft's Python files. Returns (passed, one line about it); passed is None when it could not be
+    run at all (nothing to run, or the code is not allowed in the sandbox), which is not a failure
+    of the draft."""
+    python_files = {rel: c for rel, c in files.items() if rel.endswith(".py")}
+    if not test.strip() or not python_files:
+        return None, "no self-test was written"
+    if len(test) > MAX_SELFTEST_CHARS:
+        return None, "the self-test is too long to run"
+    own = {Path(rel).stem for rel in python_files}
+    for code in list(python_files.values()) + [test]:
+        why = unsafe_code(code, own)
+        if why:
+            return None, f"self-test not run: {why}"
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        for rel, content in python_files.items():
+            (folder / Path(rel).name).write_text(content, encoding="utf-8")
+        (folder / "selftest_main.py").write_text(test, encoding="utf-8")
+        env = {"PYTHONDONTWRITEBYTECODE": "1", "PATH": os.environ.get("PATH", ""),
+               "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+        try:
+            # -S -E -s: no site-packages, no PYTHON* variables, no user site. The folder itself
+            # stays importable (which -I would take away), so the draft can be imported by name.
+            result = subprocess.run([sys.executable, "-S", "-E", "-s", "selftest_main.py"], cwd=folder,
+                                    capture_output=True, text=True, timeout=SELFTEST_TIMEOUT_SEC,
+                                    env=env)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return None, f"self-test could not be run ({type(e).__name__})"
+    if result.returncode == 0:
+        return True, "the model's own asserts passed"
+    tail = (result.stderr.strip().splitlines() or ["no output"])[-1][:200]
+    return False, f"the model's own test failed: {tail}"
+
+
+def check_draft(roots: list[Path], files: list[dict], run_tests_too: bool | None = None,
+                selftest: str = "") -> dict:
+    """{'problems': [...], 'tests': str, 'selftest': str, 'clean': {relative path: content}}.
+    'clean' only has files that passed the path rules. Problems are phrased so the model can fix
+    them. `selftest`: the asserts the model wrote for its own draft (experiment B); they run in a
+    throwaway folder and a failure becomes a problem to fix."""
     if run_tests_too is None:
         run_tests_too = os.environ.get("CODER_RUN_TESTS") == "1"
     problems: list[str] = []
@@ -138,11 +212,16 @@ def check_draft(roots: list[Path], files: list[dict], run_tests_too: bool | None
         problems += (check_python(f["content"], f["path"]) if suffix == ".py"
                      else check_js(f["content"], f["path"]) if suffix == ".js" else [])
         accepted.setdefault(root, {})[full.relative_to(root.resolve()).as_posix()] = f["content"]
+    clean = {rel: c for rel_files in accepted.values() for rel, c in rel_files.items()}
+    selftest_note = "not asked for"
+    if selftest.strip() and not problems:
+        passed, selftest_note = run_draft_test(clean, selftest)
+        if passed is False:
+            problems.append(selftest_note)
     tests = "not run (CODER_RUN_TESTS=1 turns it on; it runs model-written code on this PC)"
     if run_tests_too and not problems:
         results = [run_tests(root, rel_files) for root, rel_files in accepted.items()]
         tests = "; ".join(results)
         if "FAILED" in tests or "timed out" in tests:
             problems.append(tests)
-    return {"problems": problems, "tests": tests,
-            "clean": {rel: c for rel_files in accepted.values() for rel, c in rel_files.items()}}
+    return {"problems": problems, "tests": tests, "selftest": selftest_note, "clean": clean}

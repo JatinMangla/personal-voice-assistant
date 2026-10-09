@@ -236,6 +236,10 @@ A second AI on Kaggle that only does coding chores for Claude Code, so Claude re
 
 **What the Kaggle model adds:** `ask_repo` (answers with file:line references), real summaries, `draft_code`, search by meaning, and a one-line description of every file.
 
+**`investigate`: the Coder works in steps, like an agent.** For a big question that crosses many files ("trace what happens from the Start button until the first answer"), one search can never find every piece. `investigate` makes the Coder **plan** the question into a few smaller ones (at most 5), look each one up in the code **separately**, and then write one answer from what it found — and it shows you the steps, so you can see what it actually looked at. Use it only for the hard cross-file questions: it costs about one model call per step, so roughly 3-6x the GPU time of a normal `ask_repo`. For everything else `ask_repo` is still the right tool.
+
+Why it is not "many helpers at once": I measured it (2026-10-09). Three real questions sent at the same time took **62 s**, the same three one after another took **63 s** — no gain at all, because one Kaggle run has one pair of GPUs and answers one question at a time. Splitting the work into parallel helpers would only make it queue. The steps are written to be independent, so if the Coder ever runs a smaller model this would speed up on its own.
+
 **Models:** `qwen3-coder:30b` (19 GB; a "mixture of experts": 30B knowledge but only 3B active per word, so it is fast; split over both T4 GPUs). If it can't start, the run uses `qwen2.5-coder:14b` (9 GB) by itself. Small helper models: `qwen3-embedding:0.6b` (meaning search) and Qwen3-Reranker-0.6B (picks the best code pieces). The log prints the real speed of the run (`[coder] speed: reading ... writing ...`): please paste it so we can compare the two models.
 
 ### One-time setup (about 15 minutes)
@@ -267,6 +271,8 @@ models:
 
 - Only the folders in `CODER_ALLOWED_DIRS` (default: this repository) are ever read, and never secret files (`.env`, `*.enc`, keystores, `kaggle.json`, names containing `secret`/`password`...). **Do not add office/company folders** unless your company allows sending that code to Kaggle (Google) and ngrok.
 - The model's answers are treated as untrusted. `draft_code` never writes files; it shows a draft after checking paths, syntax and lint. Running the project's tests on a draft is **off** by default (it would run model-written code on this PC); turn it on with the user variable `CODER_RUN_TESTS=1` if you want it. It runs in a temporary copy, never in your real files.
+- **The draft also writes a few checks of its own, and those do run** (that is how a wrong answer gets caught before you see it). They are kept in a cage: an empty temporary folder holding nothing but the draft, only harmless imports allowed (no `os`, `subprocess`, `socket`...), no `open`, `exec` or `eval`, no network, and a 25-second limit. Anything outside that is **refused, not run**, and the draft is still shown to you. Switch the whole thing off with `CODER_SELFTEST=0` if you prefer.
+- When you rate an answer **bad**, you can add what the right answer was. That correction is stored on this laptop only (in `~/.jarvis-coder`) and is shown to the model next time you ask something similar, so the same mistake is not repeated. `CODER_NOTES=0` switches it off.
 - The link needs the key: ngrok rejects requests without an `Authorization` header, and the proxy checks the key (10 wrong keys in 15 minutes lock out wrong keys). Only chat and embeddings are forwarded; nothing can pull, create or delete models through it.
 - Logs show timings and sizes only, never your code or the answers.
 

@@ -38,6 +38,15 @@ def ask_repo(question: str) -> str:
 
 
 @mcp.tool()
+def investigate(question: str, max_steps: int = 5) -> str:
+    """For a hard question spanning several files ("trace what happens from X to Y", "how does the
+    whole pairing work"): the Coder plans sub-questions, searches and answers each one separately,
+    then writes one combined answer with file:line refs. Slower and more GPU time than ask_repo
+    (about one model call per step plus two), so use ask_repo for anything a single search covers."""
+    return coder.investigate(question, max_steps)
+
+
+@mcp.tool()
 def summarize(source: str, question: str = "") -> str:
     """Reduce a long log or file to what matters. `source` = a file path inside the allowed
     folders, or the text itself. `question` says what to look for. Works without the Coder too
@@ -60,9 +69,11 @@ def repo_map(path: str = "") -> str:
 
 
 @mcp.tool()
-def rate(answer_id: int, verdict: str) -> str:
-    """Rate a coder answer ('good' or 'bad') so we learn which jobs it does well."""
-    return coder.rate(answer_id, verdict)
+def rate(answer_id: int, verdict: str, correction: str = "") -> str:
+    """Rate a coder answer ('good' or 'bad') so we learn which jobs it does well. With 'bad', pass
+    `correction` (what the right answer was): it is remembered and warns the Coder the next time a
+    similar question is asked."""
+    return coder.rate(answer_id, verdict, correction)
 
 
 @mcp.tool()

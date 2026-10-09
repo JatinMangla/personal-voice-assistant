@@ -121,6 +121,7 @@ DRAFTS = [
 SAFE_IMPORTS = {"re", "math", "typing", "itertools", "collections", "string", "__future__",
                 "unicodedata", "dataclasses", "functools", "operator", "enum"}
 
+TRACE_REPEATS = 3          # the trace score wanders by up to 5 steps: score the median of 3
 SUMMARY_LOG_LINES = 3600
 PLANTED = {"CUDA out of memory": ["out of memory", "oom"],
            "ConnectionResetError": ["connectionreset", "connection reset"],
@@ -215,17 +216,36 @@ class Bench:
                 "median_s": st.median(r["wall_s"] for r in rows)}
 
     # -- 3. traces ----------------------------------------------------------------------------
-    def traces(self) -> dict:
+    def traces(self, repeats: int = TRACE_REPEATS) -> dict:
+        """Measured over 5 runs (2026-10-09): the same trace question scored 10, 7, 7, 6 and 5, so
+        ONE pass cannot tell two variants apart. Each question is asked `repeats` times with a fresh
+        answer cache and the MEDIAN is scored; `steps` is the sum of the medians."""
         rows = []
         for q, steps in TRACES:
-            t = time.time()
-            out = self.coder.ask_repo(q)
-            low = out.lower()
-            got = [k for k, alts in steps.items() if any(a in low for a in alts)]
-            rows.append({"q": q[:60], "steps": len(got), "of": len(steps), "missed": [k for k in steps if k not in got],
-                         "wall_s": round(time.time() - t, 1),
-                         "flagged_invention": "Not found anywhere in the indexed code" in out, "answer": out[:900]})
-        return {"cases": rows, "steps": sum(r["steps"] for r in rows), "of": sum(r["of"] for r in rows)}
+            runs = []
+            for _ in range(repeats):
+                self.coder.cache.conn.execute("DELETE FROM answers")   # never answer from the cache
+                self.coder.cache.conn.commit()
+                t = time.time()
+                out = self.coder.ask_repo(q)
+                low = out.lower()
+                got = [k for k, alts in steps.items() if any(a in low for a in alts)]
+                runs.append({"steps": len(got), "missed": [k for k in steps if k not in got],
+                             "wall_s": round(time.time() - t, 1),
+                             "followup_used": "it asked to read these too" in out,
+                             "flagged_invention": "Not found anywhere in the indexed code" in out,
+                             "answer": out[:900]})
+            scores = sorted(r["steps"] for r in runs)
+            median = scores[len(scores) // 2]
+            worst = min(runs, key=lambda r: r["steps"])
+            rows.append({"q": q[:60], "steps": median, "of": len(steps), "runs": scores,
+                         "spread": scores[-1] - scores[0], "missed": worst["missed"],
+                         "wall_s": round(st.mean(r["wall_s"] for r in runs), 1),
+                         "followup_used": any(r["followup_used"] for r in runs),
+                         "flagged_invention": any(r["flagged_invention"] for r in runs),
+                         "answer": runs[0]["answer"]})
+        return {"cases": rows, "steps": sum(r["steps"] for r in rows), "of": sum(r["of"] for r in rows),
+                "repeats": repeats, "max_spread": max((r["spread"] for r in rows), default=0)}
 
     # -- 4 + 5. draft_code and style ------------------------------------------------------------
     def drafts(self) -> dict:
@@ -328,14 +348,14 @@ class Bench:
                 "no_escaping_path_shown": all(".." not in b and not b.startswith(("/", "C:")) for b in shown),
                 "injection_answer": inj[:200], "missing_answer": missing[:200], "escape_answer": escape[:300]}
 
-    def run(self) -> dict:
+    def run(self, trace_repeats: int = TRACE_REPEATS) -> dict:
         print(f"[bench] {self.name}: {self.client.link_status()}")
         out = {"name": self.name, "when": time.strftime("%Y-%m-%d %H:%M"),
                "switches": {k: v for k, v in os.environ.items() if k.startswith("CODER_") and k != "CODER_KEY"},
                "index": self.coder.index.stats(), "vector_coverage": round(self.coder.index.vector_coverage(), 2)}
         for step in ("retrieval", "ask", "traces", "drafts", "summarize", "safety"):
             print(f"[bench] {step} ...")
-            out[step] = getattr(self, step)()
+            out[step] = self.traces(trace_repeats) if step == "traces" else getattr(self, step)()
         calls = self.calls
         out["cost"] = {"model_calls": len(calls),
                        "prompt_tokens": sum(c["prompt_tokens"] or 0 for c in calls),
@@ -346,8 +366,12 @@ class Bench:
 
 
 def summary_line(r: dict) -> str:
+    t = r["traces"]
+    trace = f"trace {t['steps']}/{t['of']}"
+    if t.get("repeats", 1) > 1:          # say how noisy it was, so a lucky run cannot mislead
+        trace += f" (median of {t['repeats']}, spread {t['max_spread']})"
     return (f"ask {r['ask']['named']}/{r['ask']['of']} named, {r['ask']['ref_ok']}/{r['ask']['of']} refs | "
-            f"trace {r['traces']['steps']}/{r['traces']['of']} | draft {r['drafts']['passed']}/{r['drafts']['of']} "
+            f"{trace} | draft {r['drafts']['passed']}/{r['drafts']['of']} "
             f"(style {r['drafts']['style_mean']}/6) | summarize {len(r['summarize']['found'])}/{r['summarize']['of']}"
             f"{' FELL BACK' if r['summarize']['fell_back'] else ''} | "
             f"safety {'pass' if all(v is True for k, v in r['safety'].items() if isinstance(v, bool)) else 'FAIL'} | "
@@ -360,6 +384,9 @@ def main() -> None:
     p.add_argument("--name", default="run", help="name of this variant, e.g. baseline or A-style")
     p.add_argument("--compare", nargs=2, metavar=("A", "B"), help="print two saved runs side by side")
     p.add_argument("--list", action="store_true", help="list saved runs")
+    p.add_argument("--trace-repeats", type=int, default=TRACE_REPEATS,
+                   help="how often each trace question is asked; the median is scored (default 3, "
+                        "because one pass wanders by up to 5 steps). 1 = the old, noisy behaviour")
     args = p.parse_args()
     folder = service.default_home() / "bench"
     folder.mkdir(parents=True, exist_ok=True)
@@ -381,7 +408,7 @@ def main() -> None:
     bench = Bench(args.name, service.default_roots(ROOT))
     if not bench.client.online():
         sys.exit("The Coder is not online: press Start Coder on GitHub and wait for [ready].")
-    result = bench.run()
+    result = bench.run(args.trace_repeats)
     out = folder / f"{args.name}.json"
     out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(f"\n{args.name:16} {summary_line(result)}")

@@ -68,6 +68,16 @@ copy (never your files, never the project's own test suite, which stays behind `
 and on failure sends the error back for up to 2 fixes. Switch: `CODER_SELFTEST=0`.
 **Expect:** the biggest single gain on correctness; 2-3x the model calls per draft, so slower.
 
+**What happened (2026-10-09):** the first attempt measured nothing, because `test` was an optional
+schema field and so was never returned (see the `required` trap above). Once fixed, the very first
+draft proved the point: the model's own asserts **failed its first `slugify`**, the error went back,
+and its note on the second try reads *"the issue with the previous implementation was ... `replace`
+`('-+', '-')` which doesn't work as expected for multiple consecutive hyphens"*. That is exactly the
+`slugify` behaviour bug from the original baseline, caught and fixed without anyone looking. The
+sandbox: an empty temp folder with only the draft, an import allowlist, no `open`/`exec`/`eval`, no
+network, 25 s limit, and `-S -E -s` (not `-I`, which would stop the draft being importable at all).
+Hostile tests are refused, not run, and a refusal is not counted as a failed draft.
+
 ### C. The repo map in every prompt
 **Fixes:** the invented `kaggle.api.competitions.submissions_create()` — the model could not see
 which files exist, so it guessed.
@@ -93,6 +103,43 @@ first 200 characters, so it failed a perfectly honest answer that began "there i
 for...". It now accepts any honest denial and still catches an invented function name.
 
 ### D. The model may ask for more code
+
+**What the first attempt taught us (2026-10-09), before any score:** invited politely to put the
+files it still needs in `need`, the model **never once asked** — 0 times in 17 questions, and the
+model-call count was identical to the C run, so the first `D-followup` run measured nothing about D
+(its traces 26/30 vs C's 27/30 is noise; see the variance note below). Probing it three ways showed
+why, and that the mechanism itself is fine:
+
+| What the model was shown | What it did |
+|---|---|
+| the usual 14 pieces + repo map | `need: none`, **confidence high**, and cited `scripts/start_coder.py` and `coder_proxy.py`, *neither of which it had been shown* |
+| ONE deliberately unrelated piece | `need: [4 real paths]`, empty answer, confidence low -- correct |
+| one unrelated piece, no repo map | `need: [4 INVENTED paths]` (`scripts/coder/main.py`, `server.py`, `auth.py` do not exist) |
+
+So the model asks only when it cannot bluff at all; with a repo map and a few pieces it feels
+well-informed and answers from the map's one-liners. Firmer wording did not change this. The fix was
+to stop relying on it asking: **a citation of a file it was never shown is objective evidence that it
+needed that file**, so `service._cited_but_unseen()` fetches those (through the normal safety checks,
+which is what discards the invented paths) and asks once more. Hand-checked on the 3 trace questions:
+the trigger fired on 2 of 3 and fetched exactly the right files (`start_coder.py`; then `stt.py`,
+`intents.py`, `memory.py`, `llm.py`), trace 1 reaching **10/10** -- but the total was again 27/30 at
+~1.7x the calls, because the write-up round loses steps elsewhere.
+
+**Verdict after the full run (`D2-bluff`): D is OFF by default (`CODER_FOLLOWUP=1` turns it on).**
+The honest reason is **cost, not quality**: the suite took 30 calls / 161k prompt tokens / 300 s
+against 28 / 126k / 216-222 s without it, i.e. ~35 % more GPU time for every question, and on the
+free budget a feature has to earn that. Its trace score was lower (23/30 vs 27/30) but the section
+above shows the trace metric wanders by up to 6 steps on its own, so **that part is not evidence**;
+do not repeat it as if it were. What is solid: it fetches the right files (hand-checked on all three
+traces, trace 1 reaching 10/10 that way), and it never once helped an `ask` question, which is where
+the everyday cost would fall. Keep it as a switch for a single narrow question, and use
+**`investigate`** for cross-file ones: that splits the question *before* answering instead of
+patching an answer afterwards.
+
+The run also proved something useful by accident: **the ask jump to 14/14 named and 14/14 refs came
+from A's refs rule, not from D** (the follow-up fired on no `ask` question at all; the refs sentence
+lives in `tasks.SYSTEM`, so it was active even with `CODER_STYLE=0`). Both questions C got wrong --
+the ngrok policy and `shrink` -- are right now.
 **Fixes:** the trace 8/10 — the file holding the answer was not among the pieces shown.
 **Build:** allow one extra round: if the model answers `{"need": ["coder_proxy.py", ...]}` or its
 confidence is low, fetch those files (same safety rules) and ask once more. Hard cap: one extra
@@ -125,6 +172,63 @@ code to leave the laptop (Kaggle is Google, plus ngrok).
 Draft, then let the model criticise its own draft against the code before answering. Roughly
 doubles time and cost, so it would be switched on per question, not by default.
 
+## The trap that made two experiments look dead: Ollama only fills `required` fields
+
+**Measured 2026-10-09, and it invalidated two runs before anyone noticed.** With structured output
+(`format: <schema>`), the model fills **exactly the fields listed in the schema's `required` array
+and nothing else**. A field that is only in `properties` is returned *never* -- no matter how firmly
+the prompt asks for it.
+
+That silently crippled both experiments that add a field:
+- **B (self-tests):** `test` was optional, so no draft ever came back with one. The first `AB-selftest`
+  run showed "28 calls, drafts 6/6, costs nothing" -- it had simply never run. Moving `test` into
+  `required` produced a proper 8-assert test on the very first try.
+- **D (follow-up):** `need` was optional too, so part of "the model never asks" was the schema, not
+  the model. With `need` required it now returns `[]` -- *deliberately empty*, which is what finally
+  proved the refusal is a real choice and not a plumbing bug.
+
+How to spot it: the field comes back as `None`/absent rather than empty. An empty list or string
+means the model considered it and declined; absent means it was never asked. The schemas are now
+`DRAFT_SCHEMA_WITH_TEST` and `ASK_SCHEMA_WITH_NEED`, used only when the feature is on (so a normal
+call is not forced to invent a value), and a test pins all four `required` lists.
+
+**Rule for the next experiment that adds a field: put it in `required`, then check the first real
+reply actually contains it before you spend a benchmark run.**
+
+## STOP: the trace score is too noisy to decide anything (measured over 5 runs, 2026-10-09)
+
+Five runs now exist. Lining up the per-question trace scores shows the metric wandering on its own:
+
+| run | trace 1 | trace 2 | trace 3 | total | what was different |
+|---|---|---|---|---|---|
+| baseline | 7 | 6 | 8 | 21 | - |
+| C repo map | **10** | 9 | 8 | **27** | repo map on |
+| D follow-up | 7 | 9 | 10 | 26 | switch on, but it never fired = a repeat of C |
+| D2 bluff trigger | 6 | 9 | 8 | 23 | follow-up fired on 2 traces |
+| A style+refs | **5** | 9 | 9 | 23 | follow-up off, style on |
+
+**Trace 1 scored 10, 7, 7, 6 and 5 on the identical question (spread 5 steps, stdev 1.9). The
+totals span 21-27, a spread of 6.** Traces 2 and 3 are steadier (spread 3 and 2).
+
+Consequences, and they are uncomfortable:
+- **C's headline "21 -> 27" sits inside the noise** and should not be treated as a measured 6-step
+  win any more. The repo map may still be right for other reasons (it demonstrably stopped invented
+  file names), but *the trace number did not prove it*.
+- **The D verdict below rests on the same shaky metric.** D is still switched off, because its
+  **cost** is unambiguous (30 calls / 161k tokens / 300 s against 28 / 126k / 216-222 s) and a
+  feature has to earn its cost; but "traces 27 -> 23" on its own is not evidence that it harms
+  quality.
+- **Never again decide a trace experiment from one run.** Three runs of each variant, and compare
+  the medians, or use the stable metrics instead.
+
+**What IS stable across all five runs:** `drafts` 6/6 every time, and `ask` named/refs move only
+when something real changes -- refs went 12/14 -> **14/14 in exactly the two runs carrying A's refs
+rule**, and reproduced. Prefer `ask`, `refs`, `drafts`, `summarize`, `safety` and cost for verdicts;
+treat traces as a weak hint that needs repeating.
+
+A cheap fix for a later session: the benchmark could run each trace question 3 times and keep the
+median, at the price of 6 more model calls (~1 extra minute of GPU).
+
 ## How a winner is decided
 
 - **Keep** a variant if it improves its target number and makes nothing else worse.
@@ -142,13 +246,14 @@ Measured with `scripts/coder_bench.py --name <variant>`; `--list` and `--compare
 |---|---|---|---|---|---|---|---|---|
 | **baseline** (2026-10-09) | 13/14 named, **12/14 refs** | **21/30** | **6/6** | **5.33/6** | 3/3 | pass | 28 calls, 61.5k+4.7k tok, 152 s | reference |
 | **C repo map** (2026-10-09) | 12/14 named, 12/14 refs | **27/30** | 6/6 | 5.17/6 | 3/3 | pass | 28 calls, **126k**+5.4k tok, 222 s | **KEPT** |
-| A style | | | | | | | | |
+| **D follow-up, invited** (2026-10-09) | 12/14 named, 12/14 refs | 26/30 | 6/6 | 5.67/6 | 3/3 | pass | 28 calls, 128k+5.0k tok, 227 s | **measured nothing: the model never asked once.** Doubles as the noise measurement above |
+| **D2 follow-up, triggered by an unseen citation** (2026-10-09) | **14/14 named, 14/14 refs** (that is A's refs rule, not D: follow-up did not fire on any ask question) | **23/30** | 6/6 | 5.33/6 | 3/3 | pass | 30 calls, **161k**+6.4k tok, **300 s** | **OFF by default.** Traces 27 -> 23 (trace 1 fell 10/10 -> 6/10) for 35 % more model time |
+| **A style + refs** (2026-10-09) | **14/14 named, 14/14 refs** (reproduced) | 23/30 (noise) | 6/6 | **5.67/6** | 3/3 | pass | 28 calls, 129k+5.1k tok, **216 s** | **KEPT, on by default** |
 | B self-test | | | | | | | | |
-| C repo map | | | | | | | | |
-| D follow-up | | | | | | | | |
 | E notes | | | | | | | | |
 | F 14B | | | | | | | | |
-| A+B+C+D combined | | | | | | | | |
+| I investigate (agentic loop) | | | | | | | | not on the benchmark: it answers trace questions, see below |
+| combined keepers | | | | | | | | |
 
 ## What the baseline run already told us (2026-10-09)
 
@@ -169,6 +274,36 @@ Run with the 6-spec draft suite and 3 traces, not the smaller first benchmark:
   and the model itself declined the escaping path. The probe now checks the outcome, not the words.
 
 Order to run next, by expected gain: **C (repo map) -> D (follow-up) -> A (style + refs) -> B (self-tests)**.
+
+## I. The agentic loop (`investigate`), and why it is NOT parallel
+
+The owner asked for "multi subagents, working like agentic AI, for faster work". Half of that is
+built, and the other half is measured away:
+
+**Measured 2026-10-09 against the live Coder** (`scratchpad/probe_parallel*.py`, Run 2 of the day):
+
+| What was sent | One request alone | Three at once | Speed-up |
+|---|---|---|---|
+| Tiny prompt ("count to 40", ~30 tokens) | 5.0 s | 6.4 s total | **2.4x** |
+| Realistic prompt (16k tokens, like `ask_repo`) | 20.9 s | 62.2 s total | **1.01x = none** |
+
+The small prompts only *looked* parallel because prefilling them is nearly free; with a real
+16k-token prompt the three finished at 22 s, 42 s and 62 s, i.e. strictly one after another.
+`coder_main.py` sets `OLLAMA_NUM_PARALLEL=1` on purpose (one user, the whole 32k context for one
+request), and the two T4s are the bottleneck either way. **So "several subagents at once" cannot make
+this Coder faster** — the requests queue, and raising the parallelism would shrink each request's
+context and risk running out of GPU memory. (Trap 7 again: the first probe was one cheap sample and
+it pointed the wrong way. Always use a realistic prompt.)
+
+What *is* worth having is the agentic part: **`investigate`** plans a hard question into at most
+`tasks.MAX_STEPS` (5) sub-questions, **searches and answers each one separately**, then writes the
+findings up as one answer. The gain is retrieval, not concurrency: each step runs its own search, so
+it sees code that a single search for the whole question never ranks — the same weakness D attacks,
+from the other side. It costs one model call per step plus two, so it is a tool to reach for on
+cross-file questions, never the default; `ask_repo` stays the everyday one.
+
+It would become faster for free if the Coder ever moves to the 14B (experiment F) or is given more
+parallelism, because the steps are independent by construction. Until then, sequential.
 
 ## Why not LoRA yet
 

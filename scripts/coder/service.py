@@ -34,6 +34,8 @@ MAX_READ_BYTES = 5_000_000
 MAX_CONTEXT_FILES = 6
 MAX_CONTEXT_CHARS = 30_000
 DRAFT_TRIES = 3
+FOLLOWUP_FILE_CHARS = 14_000     # one requested file is trimmed to this (experiment D)
+FOLLOWUP_TOTAL_CHARS = 40_000    # and all of them together to this, so the context cannot overflow
 OFFLINE_NOTE = "The Coder is offline (press Start Coder on GitHub). "
 FENCE = "````"          # longer than the usual ``` so code containing fences stays intact
 _FROM_ENV = object()
@@ -148,18 +150,36 @@ class Coder:
         self.index.refresh(max_age=REFRESH_EVERY)
         if not self.client:
             return self._without_coder(question, "CODER_URL and CODER_KEY are not set. ")
+        asked_for: list[str] = []
+        extra_pieces: list[dict] = []
         try:
             hits = self._deep_search(question, self._chunks_for(question))
             if not hits:
                 return "No matching code found."
-            result = tasks.ask(self.client, question, hits, repo_map=self.prompt_map())
+            repo_map = self.prompt_map()
+            may_ask = self._followup_on()
+            notes = self._notes_for("ask_repo", question)
+            result = tasks.ask(self.client, question, hits, repo_map=repo_map, may_ask=may_ask,
+                               notes=notes)
+            wanted = result["need"] or (self._cited_but_unseen(result["refs"], hits) if may_ask else [])
+            if may_ask and wanted:
+                extra_pieces, asked_for = self._fetch_needed(wanted, hits)
+                if extra_pieces:
+                    result = tasks.ask_again(self.client, question, hits, extra_pieces,
+                                             repo_map=repo_map, notes=notes)
+                elif not result["answer"]:
+                    # It asked for files none of which could be read: let it answer with what it has.
+                    result = tasks.ask(self.client, question, hits, repo_map=repo_map, may_ask=False,
+                                       notes=notes)
         except Offline:
             return self._without_coder(question, OFFLINE_NOTE)
         except CoderError as e:
             return self._without_coder(question, f"The Coder could not answer ({e}). ")
-        refs = self._valid_refs(result["refs"], hits)
+        refs = self._valid_refs(result["refs"], hits, asked_for)
         unverified = self._unverified_names(result["answer"])
         text = f"{result['answer']}\nRefs: {', '.join(refs) or 'none given'}\nConfidence: {result['confidence']}"
+        if asked_for:
+            text += "\n(it asked to read these too: " + ", ".join(asked_for) + ")"
         if unverified:
             text += ("\nNot found anywhere in the indexed code (the model may have invented them; verify "
                      "before relying on them): " + ", ".join(unverified))
@@ -167,8 +187,64 @@ class Coder:
             text += "\n(the answer was cut at the length limit: ask about one part at a time for the rest)"
         if result["confidence"] == "low" or not result["answer"] or unverified or result.get("cut"):
             return text + "\n(not cached; check the code or ask again with other words)"
-        files = [Path(h["file"]) for h in hits]
+        # The follow-up files are part of the answer too: if one of them changes, the cached
+        # answer must go stale with it.
+        files = [Path(h["file"]) for h in hits + extra_pieces]
         answer_id = self.cache.put("ask_repo", question, text, files)
+        return f"{text}\n(answer #{answer_id}; rate it with the rate tool)" + self._warning()
+
+    def investigate(self, question: str, max_steps: int = tasks.MAX_STEPS) -> str:
+        """A hard, cross-file question answered in steps: the Coder plans sub-questions, searches
+        and answers each one on its own, then writes the findings up as one answer. Costs about one
+        model call per step plus two, so it is for questions that one `ask_repo` cannot cover.
+
+        It is sequential on purpose: the Coder answers one request at a time (measured), so running
+        the steps at once would not be faster, only harder to follow."""
+        self.touch()
+        if not question.strip():
+            return "Ask a question about the code."
+        cached = self.cache.get("investigate", question)
+        if cached:
+            return f"{cached['answer']}\n(cached, answer #{cached['id']})"
+        self.index.refresh(max_age=REFRESH_EVERY)
+        if not self.client:
+            return self._without_coder(question, "CODER_URL and CODER_KEY are not set. ")
+        max_steps = max(1, min(max_steps, tasks.MAX_STEPS))
+        repo_map = self.prompt_map()
+        seen_files: list[Path] = []
+        lines: list[str] = []
+        try:
+            steps = tasks.plan(self.client, question, repo_map=repo_map, max_steps=max_steps)
+            findings: list[tuple[str, str]] = []
+            for step in steps:
+                hits = self._deep_search(step, ASK_CHUNKS)
+                if not hits:
+                    findings.append((step, "no matching code was found for this step"))
+                    lines.append(f"- {step}\n  nothing found")
+                    continue
+                result = tasks.ask(self.client, step, hits, repo_map=repo_map)
+                refs = self._valid_refs(result["refs"], hits)
+                seen_files += [Path(h["file"]) for h in hits]
+                answer = result["answer"] or "no answer for this step"
+                findings.append((step, answer + (f" (refs: {', '.join(refs)})" if refs else "")))
+                lines.append(f"- {step}\n  {answer[:300]}" + (f"\n  refs: {', '.join(refs)}" if refs else ""))
+            final = tasks.write_up(self.client, question, findings, repo_map=repo_map)
+        except Offline:
+            return self._without_coder(question, OFFLINE_NOTE)
+        except CoderError as e:
+            return self._without_coder(question, f"The Coder could not investigate ({e}). ")
+        shown = {self.index.display(p.as_posix()) for p in seen_files}
+        refs = [r for r in final["refs"] if r.rsplit(":", 1)[0] in shown or r in shown][:10]
+        unverified = self._unverified_names(final["answer"])
+        text = (f"{final['answer']}\nRefs: {', '.join(refs) or 'none given'}\n"
+                f"Confidence: {final['confidence']}\nLooked at it in {len(findings)} steps:\n"
+                + "\n".join(lines))
+        if unverified:
+            text += ("\nNot found anywhere in the indexed code (the model may have invented them; verify "
+                     "before relying on them): " + ", ".join(unverified))
+        if final["confidence"] == "low" or not final["answer"] or unverified:
+            return text + "\n(not cached; check the code or ask again with other words)"
+        answer_id = self.cache.put("investigate", question, text, list(dict.fromkeys(seen_files)))
         return f"{text}\n(answer #{answer_id}; rate it with the rate tool)" + self._warning()
 
     @staticmethod
@@ -205,10 +281,73 @@ class Coder:
         return why + "Closest code instead:\n" + (self._format_hits(hits) if hits else "No matches.")
 
     @staticmethod
-    def _valid_refs(refs: list[str], hits: list[dict]) -> list[str]:
-        """Only references to files that were really shown to the model (it may invent others)."""
-        shown = {h["path"] for h in hits}
+    def _valid_refs(refs: list[str], hits: list[dict], extra: list[str] | None = None) -> list[str]:
+        """Only references to files that were really shown to the model (it may invent others).
+        `extra`: files it asked for in a follow-up round, which it was also shown."""
+        shown = {h["path"] for h in hits} | set(extra or [])
         return [r for r in refs if r.rsplit(":", 1)[0] in shown or r in shown][:8]
+
+    def _cited_but_unseen(self, refs: list[str], hits: list[dict]) -> list[str]:
+        """Files the answer leans on that the model was never shown (experiment D's real trigger).
+
+        Measured 2026-10-09: invited to ask for files, the model never did in 17 questions. It
+        answers cross-file questions at "high" confidence from the repo map's one-liners and cites
+        files it has not read. Given only an unrelated piece it DOES ask correctly, so the mechanism
+        works and only the trigger was wrong: a citation of something it was not shown is objective
+        evidence that it needed that file, so we fetch it and ask again instead of trusting the guess.
+        """
+        shown = {h["path"] for h in hits}
+        wanted: list[str] = []
+        for ref in refs:
+            path = ref.rsplit(":", 1)[0].strip()
+            if path and path not in shown and path not in wanted and self._resolve_source(path):
+                wanted.append(path)
+        return wanted[:tasks.MAX_NEED]
+
+    def _notes_for(self, task: str, question: str) -> list[dict]:
+        """Experiment E: past answers to similar questions that were rated wrong. CODER_NOTES=0 off."""
+        if os.environ.get("CODER_NOTES", "1") == "0":
+            return []
+        return self.cache.notes_for(task, question)
+
+    @staticmethod
+    def _followup_on() -> bool:
+        """Experiment D: one extra round for files the answer leans on but was never shown.
+
+        OFF by default, because it was measured and it lost: traces 27/30 -> 23/30 (one trace fell
+        10/10 -> 6/10) for 35 % more model time, since the extra round displaces steps from the final
+        answer. It fetches the right files (hand-checked), so it stays behind CODER_FOLLOWUP=1 for
+        single narrow questions; `investigate` is the better answer for cross-file ones.
+        """
+        return os.environ.get("CODER_FOLLOWUP", "0") != "0"
+
+    def _fetch_needed(self, wanted: list[str], hits: list[dict]) -> tuple[list[dict], list[str]]:
+        """The files the model asked for, as chunk-shaped pieces, through the normal safety checks.
+        Files it was already shown are skipped, and the total is trimmed so the context cannot
+        overflow. Returns (pieces, the paths that were really read)."""
+        already = {h["path"] for h in hits}
+        pieces, names, used = [], [], 0
+        for raw in wanted[:tasks.MAX_NEED]:
+            path = self._resolve_source(raw.strip().split(":")[0])
+            if path is None:
+                continue
+            shown = self.index.display(path.as_posix())
+            if shown in already or shown in names:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            room = min(FOLLOWUP_FILE_CHARS, FOLLOWUP_TOTAL_CHARS - used)
+            if room < 400:
+                break
+            cut = text[:room]
+            pieces.append({"path": shown, "file": path.as_posix(), "first": 1,
+                           "last": len(cut.splitlines()), "kind": "file", "name": "",
+                           "text": cut + ("\n[... file continues ...]" if len(text) > room else "")})
+            names.append(shown)
+            used += len(cut)
+        return pieces, names
 
     def _resolve_source(self, source: str) -> Path | None:
         """A path (absolute, or relative to the first allowed folder) that is allowed to be read."""
@@ -282,12 +421,13 @@ class Coder:
             if cached:
                 return f"{cached['answer']}\n(cached, answer #{cached['id']}; pass fresh=true for a new try)"
         problems: list[str] = []
-        draft, check = {"files": [], "notes": ""}, {"problems": ["no draft"], "tests": "", "clean": {}}
+        draft = {"files": [], "notes": "", "test": ""}
+        check = {"problems": ["no draft"], "tests": "", "selftest": "", "clean": {}}
         try:
             for attempt in range(DRAFT_TRIES):
                 draft = tasks.draft(self.client, spec, context, problems or None,
                                     draft["files"] if problems else None)
-                check = selfcheck.check_draft(self.roots, draft["files"])
+                check = selfcheck.check_draft(self.roots, draft["files"], selftest=draft.get("test", ""))
                 if not check["problems"]:
                     break
                 problems = check["problems"]
@@ -299,6 +439,8 @@ class Coder:
         blocks = "\n".join(f"{FENCE}{rel}\n{content}\n{FENCE}" for rel, content in check["clean"].items())
         status = (f"Checks: passed (paths, syntax, lint). Tests: {check['tests']}" if ok else
                   f"Checks: FAILED after {DRAFT_TRIES} tries: " + "; ".join(check["problems"])[:600])
+        if check.get("selftest") and check["selftest"] != "not asked for":
+            status += f"\nSelf-test: {check['selftest']}"
         text = (f"[Draft by the coder model. NOT written to disk. Review before using.]\n{blocks}\n"
                 f"Notes: {draft['notes'] or 'none'}\n{status}")
         answer_id = self.cache.put("draft_code", key, text, used) if ok else None
@@ -309,10 +451,17 @@ class Coder:
         """The Coder's free-limit warning, from the last health check (no extra request)."""
         return self.client.warning_line() if self.client else ""
 
-    def rate(self, answer_id: int, verdict: str) -> str:
-        if self.cache.rate(answer_id, verdict.strip().lower()):
-            return f"Rated answer {answer_id}: {verdict.strip().lower()}."
-        return "Unknown answer id, or the verdict was not 'good' or 'bad'."
+    def rate(self, answer_id: int, verdict: str, correction: str = "") -> str:
+        """`correction` (only useful with 'bad'): what was actually right. It is remembered and
+        shown the next time a similar question is asked (experiment E)."""
+        verdict = verdict.strip().lower()
+        if not self.cache.rate(answer_id, verdict):
+            return "Unknown answer id, or the verdict was not 'good' or 'bad'."
+        text = f"Rated answer {answer_id}: {verdict}."
+        if verdict == "bad" and self.cache.add_note(answer_id, correction):
+            text += (" Remembered, so a similar question is warned next time"
+                     + (" (with your correction)." if correction.strip() else "."))
+        return text
 
     def status(self) -> str:
         s = self.index.stats()

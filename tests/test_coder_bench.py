@@ -173,3 +173,91 @@ def test_any_honest_denial_counts_as_a_pass(answer):
 @pytest.mark.parametrize("answer", INVENTED)
 def test_an_invented_function_is_not_mistaken_for_a_denial(answer):
     assert not denies(answer)
+
+
+# --- repeated trace questions (the median), added after 5 runs showed the score wanders ----------
+class FakeCoder:
+    """Stands in for the Coder: returns the answers it is given, one per ask_repo call."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.asked = []
+
+        class Cache:
+            def __init__(self):
+                self.conn = self
+
+            def execute(self, *a):
+                return self
+
+            def commit(self):
+                pass
+        self.cache = Cache()
+
+    def ask_repo(self, question):
+        self.asked.append(question)
+        return self.answers.pop(0)
+
+
+def _bench_with(answers):
+    b = bench.Bench.__new__(bench.Bench)        # no network, no index: only traces() is exercised
+    b.coder = FakeCoder(answers)
+    b.calls = []
+    return b
+
+
+def test_a_trace_question_is_asked_several_times_and_the_median_is_scored():
+    """One pass scored 10, 7, 7, 6 and 5 on the same question across real runs, so the judge must
+    repeat and take the middle value, not believe a single lucky or unlucky pass."""
+    hit = ("start_coder upload_secrets jarvis-secrets kernels push coder.ipynb notebook coder_main "
+           "_run load_coder_model ollama coder_proxy create_app coder_traffic_policy key_matches "
+           "watchdog stop_reason idle")
+    miss = "nothing useful here"
+    # question 1: good, bad, good -> median good; questions 2 and 3: always bad
+    answers = [hit, miss, hit] + [miss] * 6
+    b = _bench_with(answers)
+    out = b.traces(repeats=3)
+    assert out["repeats"] == 3
+    assert len(b.coder.asked) == 9                      # 3 questions x 3 repeats
+    first = out["cases"][0]
+    assert first["runs"] == [0, 10, 10] or first["runs"] == [0, 10, 10]
+    assert first["steps"] == 10                         # the median of 0, 10, 10
+    assert first["spread"] == 10
+    assert out["max_spread"] == 10
+
+
+def test_the_median_ignores_one_unlucky_pass():
+    good = ("start_coder upload_secrets jarvis-secrets kernels push coder.ipynb notebook coder_main "
+            "_run load_coder_model ollama coder_proxy create_app coder_traffic_policy key_matches "
+            "watchdog stop_reason idle")
+    b = _bench_with([good, good, "nothing"] + ["nothing"] * 6)
+    out = b.traces(repeats=3)
+    assert out["cases"][0]["steps"] == 10               # two good passes win over one bad
+
+
+def test_the_worst_pass_is_what_gets_reported_as_missed():
+    """The missed list should show what CAN go wrong, so the next session knows what to fix."""
+    full = ("/api/turn handle_turn stt transcribe intents parse_command recall memory quick_search "
+            "detect stream_reply llm sentencechunker tts synthesize ndjson learn add_turn")
+    b = _bench_with([full, "only /api/turn handle_turn", full] + ["nothing"] * 6)
+    out = b.traces(repeats=3)
+    assert out["cases"][0]["missed"], "the worst pass had misses, they must be reported"
+
+
+def test_one_repeat_keeps_the_old_cheap_behaviour():
+    b = _bench_with(["nothing"] * 3)
+    out = b.traces(repeats=1)
+    assert len(b.coder.asked) == 3 and out["repeats"] == 1 and out["max_spread"] == 0
+
+
+def test_the_summary_line_says_how_noisy_the_traces_were():
+    run = {"ask": {"named": 14, "ref_ok": 14, "of": 14},
+           "traces": {"steps": 24, "of": 30, "repeats": 3, "max_spread": 4},
+           "drafts": {"passed": 6, "of": 6, "style_mean": 5.67},
+           "summarize": {"found": ["a", "b", "c"], "of": 3, "fell_back": False},
+           "safety": {"ok": True},
+           "cost": {"model_calls": 34, "prompt_tokens": 1000, "reply_tokens": 100, "total_model_s": 200.0}}
+    line = bench.summary_line(run)
+    assert "median of 3" in line and "spread 4" in line
+    run["traces"] = {"steps": 24, "of": 30}
+    assert "median" not in bench.summary_line(run)
