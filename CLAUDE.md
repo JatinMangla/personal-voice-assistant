@@ -300,6 +300,19 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
     sends NOTHING when there is nothing to do (looks again every 10 min; 5 min when offline).
     Anything new that talks to the Coder in the background must set `background=True`.
 
+## Status (2026-10-09, latest): improving the Coder, 1 of 7 experiments done
+**Next session: read [docs/CODER_HANDOVER.md](docs/CODER_HANDOVER.md) first.** It has the state, how
+to run the benchmark, the order to work in (D -> A -> B -> E -> F -> G, then combine) and the traps.
+- `scripts/coder_bench.py` is the judge: same questions every run, saved per variant
+  (`--name`, `--compare a b`, `--list`), 587 tests pass. A change is kept only if its target number
+  improves and nothing else (safety included) gets worse.
+- Measured: baseline (ask 13/14, traces 21/30, drafts 6/6, style 5.33/6) and **C = repo map in the
+  prompt: traces 21/30 -> 27/30, KEPT** (cost: prompt tokens 61.5k -> 126k, ask 4.9 -> 6.8 s).
+- The plan and result table: [docs/CODER_IMPROVEMENTS.md](docs/CODER_IMPROVEMENTS.md). LoRA stays last.
+- Also built today: a **free-limit warning** before a run ends ("Free limit: today's GPU time is at
+  92%; about 18 min left..."), long summaries no longer fail (1100-token budget + repaired cut-off
+  JSON), wide questions read 14 pieces of code, and invented names are flagged under the answer.
+
 ## Status (2026-10-09): Coder helper WORKS on Kaggle (measured)
 - **Run 1 (version 1)** reached `[ready]` in 393 s: `qwen3-coder:30b` downloaded in 173 s, loaded in
   120 s (load 79 s), **reading ~1242 tok/s, writing ~66 tok/s** on `cuda: Tesla T4, cuda: Tesla T4`

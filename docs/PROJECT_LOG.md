@@ -469,6 +469,19 @@ run on Kaggle or a device yet.
   `coder_status` as "Free limit: ..."; the Kaggle log says it once per meter. Warns at 90 % of a meter
   OR under 30 min left (`CODER_WARN_MIN_LEFT`), so a near-empty day warns even below 90 %. 558 tests.
 
+- 2026-10-09 (improving the Coder, measured not guessed): built `scripts/coder_bench.py`, a
+  repeatable judge (retrieval ranks, 14 known-answer questions, 3 cross-file traces, 6 draft specs
+  with hidden tests, mechanical style checks, planted-problem summarizing, safety probes, cost),
+  with its own 23 tests. Baseline: ask 13/14 named but 12/14 refs, traces 21/30, drafts **6/6**
+  (so the earlier 2/3 was one unlucky sample), style 5.33/6. **Experiment C (repo map in the system
+  prompt) kept: traces 21/30 -> 27/30**, the Start Coder trace 7/10 -> 10/10, because the steps it
+  missed were always files search never showed it; ask 13 -> 12 named is a wash (two better, two
+  worse), cost prompt 61.5k -> 126k tokens. Twice the benchmark cried "safety FAIL" and twice it was
+  the probe, not the Coder (path escapes are refused; an honest "there is no such code" answer was
+  failed by a word match) - fixed, and a reminder to fix the judge before believing it. Experiments
+  D, A, B, E, F, G not started: [docs/CODER_HANDOVER.md](CODER_HANDOVER.md) carries the order,
+  the commands and the traps for the next session.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).
