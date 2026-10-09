@@ -242,6 +242,22 @@ median, at the price of 6 more model calls (~1 extra minute of GPU).
 
 Measured with `scripts/coder_bench.py --name <variant>`; `--list` and `--compare a b` print them.
 
+**Where it stands after the second session (2026-10-09).** The default is now **A + B + C**:
+
+| Number | baseline | now (A+B+C) |
+|---|---|---|
+| `ask_repo` names the right function | 13/14 | **14/14** |
+| cites a file it was really shown | 12/14 | **14/14** |
+| draft style (mechanical checks) | 5.33/6 | **5.83/6** |
+| drafts pass my hidden tests | 6/6 | 6/6 (and now self-repair: `mask_digits` fixed itself) |
+| traces | 21/30 | 24/30 (median of 3, spread 2) -- but see the noise section |
+| safety | pass | pass |
+
+The honest reading: **`ask_repo` and draft style are at or near the ceiling of this benchmark**, and
+the cost of getting there was one prompt paragraph (A) plus +2 model calls per 6 drafts (B). What is
+*not* solved is the cross-file trace question, where the benchmark itself can no longer tell small
+differences apart; `investigate` is the next thing to judge there, and it needs a fresh GPU day.
+
 | Variant | ask_repo | trace | draft | style | summarize | safety | cost | verdict |
 |---|---|---|---|---|---|---|---|---|
 | **baseline** (2026-10-09) | 13/14 named, **12/14 refs** | **21/30** | **6/6** | **5.33/6** | 3/3 | pass | 28 calls, 61.5k+4.7k tok, 152 s | reference |
@@ -249,11 +265,12 @@ Measured with `scripts/coder_bench.py --name <variant>`; `--list` and `--compare
 | **D follow-up, invited** (2026-10-09) | 12/14 named, 12/14 refs | 26/30 | 6/6 | 5.67/6 | 3/3 | pass | 28 calls, 128k+5.0k tok, 227 s | **measured nothing: the model never asked once.** Doubles as the noise measurement above |
 | **D2 follow-up, triggered by an unseen citation** (2026-10-09) | **14/14 named, 14/14 refs** (that is A's refs rule, not D: follow-up did not fire on any ask question) | **23/30** | 6/6 | 5.33/6 | 3/3 | pass | 30 calls, **161k**+6.4k tok, **300 s** | **OFF by default.** Traces 27 -> 23 (trace 1 fell 10/10 -> 6/10) for 35 % more model time |
 | **A style + refs** (2026-10-09) | **14/14 named, 14/14 refs** (reproduced) | 23/30 (noise) | 6/6 | **5.67/6** | 3/3 | pass | 28 calls, 129k+5.1k tok, **216 s** | **KEPT, on by default** |
-| B self-test | | | | | | | | |
-| E notes | | | | | | | | |
-| F 14B | | | | | | | | |
-| I investigate (agentic loop) | | | | | | | | not on the benchmark: it answers trace questions, see below |
-| combined keepers | | | | | | | | |
+| **AB self-test, inert** (2026-10-09) | 14/14, 14/14 | 23/30 | 6/6 | 5.5/6 | 3/3 | pass | 28 calls, 131k+5.0k tok, 211 s | **measured nothing:** `test` was an optional schema field, so no draft ever returned one |
+| **A+B, self-test working** (2026-10-09) | **14/14 named, 14/14 refs** | **24/30** (median of 3, spread 2) | 6/6 | **5.83/6** (best) | 3/3 | pass | 37 calls total, but **B itself only +2 calls** (8 vs 6 for the 6 drafts); the other 6 are the new 3x trace repeats | **BOTH KEPT, on by default** |
+| E notes | | | | | | | | built + tested, **not measured** (the benchmark has no history; measure by hand) |
+| F 14B | | | | | | | | not started |
+| I investigate (agentic loop) | | | | | | | | built + 12 tests, **not measured**; compare it to `ask_repo` on repeated trace questions |
+| combined keepers | | | | | | | | A+B is the current default; E and `investigate` still to judge |
 
 ## What the baseline run already told us (2026-10-09)
 

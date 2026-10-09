@@ -482,6 +482,42 @@ run on Kaggle or a device yet.
   D, A, B, E, F, G not started: [docs/CODER_HANDOVER.md](CODER_HANDOVER.md) carries the order,
   the commands and the traps for the next session.
 
+- 2026-10-09 (second session: A kept, D parked, B fixed, an agentic `investigate`, and two traps
+  that had been silently voiding runs). **A is the keeper:** a house-style block for drafts plus one
+  sentence demanding that every `refs` entry be a file the model was really shown took `ask_repo` to
+  **14/14 named and 14/14 refs**, reproduced in two runs, at no extra cost (216 s vs 222 s); it fixed
+  both questions C got wrong and C's own two losses, which were the model trusting a repo-map line as
+  if it had read that file. **D is parked** behind `CODER_FOLLOWUP=1`: invited to name the files it
+  still needed, it never asked once in 17 questions - it answers cross-file questions at "high"
+  confidence from the repo map and cites files it never saw. Given only an unrelated piece it asks
+  correctly, so the mechanism was fine and the trigger was wrong; it now fetches any file the answer
+  *cites but was not shown*, which works (hand-checked, the right files every time, one trace
+  reaching 10/10) but costs ~35 % more GPU time and never helped an `ask` question. **B works and
+  earned its place:** the draft now returns its own asserts, they run in an empty temp folder (import
+  allowlist, no `open`/`exec`/`eval`, no network, 25 s, `-S -E -s` rather than `-I`, which would stop
+  the draft being importable), and the very first draft failed its own `slugify` test and fixed
+  itself, naming the real bug - the same behaviour bug the original baseline hit. **E** (a bad rating
+  plus a correction warns a later similar question) and **`investigate`** (plans a hard question into
+  <= 5 sub-questions, searches and answers each separately, then writes one answer showing its steps)
+  are built and tested but **not yet measured**. The owner asked for "multi subagents for faster
+  work": measured and answered honestly - three realistic 16k-token requests at once took **62.2 s
+  against 62.7 s serial (1.01x)**, because one Kaggle run answers one request at a time, so parallel
+  subagents cannot help; the agentic *planning* was built instead, sequential by measurement, with
+  independent steps so a smaller model would parallelise for free. (A first probe with tiny prompts
+  showed a misleading 2.4x: one cheap sample is not a measurement.) **The two traps:** (1) Ollama's
+  structured output fills ONLY the fields named in `required`, so the optional `test` and `need`
+  fields came back *never* and the first B and D runs measured nothing at all - both now have their
+  own schema and a test pinning it; (2) the trace score wanders by up to **5 steps on one question**
+  (10, 7, 7, 6, 5 across five runs, totals 21-27), which puts C's celebrated "21 -> 27" inside the
+  noise and means it should no longer be called a measured win - the judge now asks each trace
+  question 3 times and scores the median, printing the spread. **The default is now A + B + C**, and
+  against the baseline that is: `ask_repo` names 13 -> **14/14**, cites a file it was really shown
+  12 -> **14/14**, draft style 5.33 -> **5.83/6**, drafts 6/6 and now self-repairing (`mask_digits`
+  failed its own test and fixed itself), traces 21 -> 24/30 (median of 3, spread 2), safety pass -
+  for one prompt paragraph and **+2 model calls per 6 drafts**. `ask_repo` and draft style are at
+  this benchmark's ceiling; the cross-file trace is the open ground, and `investigate` is the thing
+  to judge there next. 645 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

@@ -300,7 +300,51 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
     sends NOTHING when there is nothing to do (looks again every 10 min; 5 min when offline).
     Anything new that talks to the Coder in the background must set `background=True`.
 
-## Status (2026-10-09, latest): improving the Coder, 1 of 7 experiments done
+33. (2026-10-09) **Ollama's structured output (`format: <schema>`) fills ONLY the fields listed in
+    the schema's `required` array.** A field that is merely in `properties` comes back *never*, no
+    matter how firmly the prompt asks for it. Two Coder experiments looked dead because of this (the
+    draft's own `test`, the follow-up's `need`) and two benchmark runs measured nothing before it was
+    found. Tell them apart by the reply: absent/`None` = never asked for, empty `[]`/`""` = the model
+    considered it and declined. Any new field goes in `required` (see `tasks.DRAFT_SCHEMA_WITH_TEST`
+    and `ASK_SCHEMA_WITH_NEED`), and check the first real reply contains it before spending GPU time.
+34. (2026-10-09) **The Coder answers one request at a time**, so there is no point in parallel
+    "subagents": 3 realistic 16k-token requests at once took 62.2 s versus 62.7 s one after another
+    (1.01x). With tiny prompts it *looks* like 2.4x, because prefilling them is nearly free - always
+    measure with a realistic prompt. `coder_main.py` sets `OLLAMA_NUM_PARALLEL=1` on purpose (one
+    user, the whole 32k context for one request, two T4s).
+35. (2026-10-09) **The Coder benchmark's trace score is noisy: up to 5 steps on the same question**
+    (10, 7, 7, 6, 5 across five runs). Never decide an experiment from one run's trace number;
+    `coder_bench.py` now asks each trace question 3 times and scores the median (`--trace-repeats`).
+    `ask` named/refs and the draft pass rate are the stable numbers.
+
+## Status (2026-10-09, latest): Coder improvements, A kept + an agentic `investigate`
+**Next session: read [docs/CODER_HANDOVER.md](docs/CODER_HANDOVER.md) first.** 643 tests pass;
+`main` is at 23d1ed5 **locally, not pushed** (the owner reviews first; this work is all in
+`scripts/` + `docs/`, which the Kaggle deploy workflow does not watch anyway).
+- **Kept, on by default: A** (house style for drafts + "every ref must be a file you were shown").
+  `ask_repo` is now at the ceiling: **14/14 named, 14/14 refs**, reproduced, at no extra cost.
+- **Parked: D** (`CODER_FOLLOWUP=1`). It fetches the right files, but costs ~35 % more GPU time and
+  never helped an `ask` question. Invited politely the model never asked at all: it answers from the
+  repo map at "high" confidence and cites files it never saw, so the trigger is now "it cited a file
+  it was not shown".
+- **On: B** (`CODER_SELFTEST`), the draft's own asserts, run in a locked-down temp folder. It caught
+  the real `slugify` behaviour bug on its first try, and costs only **+2 model calls per 6 drafts**.
+- **The default is now A + B + C.** Against the baseline: `ask_repo` names 13 -> **14/14**, refs
+  12 -> **14/14**, draft style 5.33 -> **5.83/6**, drafts 6/6 and now self-repairing, safety pass.
+  `ask_repo` and draft style are at this benchmark's ceiling; the cross-file trace is the open ground.
+- **Built but NOT measured: E** (`CODER_NOTES`, remembered corrections) and **`investigate`**, the
+  agentic loop: it plans a hard question into <= 5 sub-questions, searches and answers each one
+  separately, then writes one answer showing its steps. Measure both in a fresh session.
+- **"Multi subagents for faster work" was measured and answered: it cannot work here.** Three
+  realistic 16k-token requests at once took 62.2 s against 62.7 s serial (**1.01x**) - one Kaggle run
+  answers one request at a time (`OLLAMA_NUM_PARALLEL=1`, two T4s). The agentic planning was built
+  instead; its steps are independent, so a smaller model would parallelise for free.
+- **Two traps that void measurements, now documented and pinned by tests:** (a) Ollama fills ONLY
+  the schema fields in `required`, so an optional new field is returned *never* - that silently made
+  the first B and D runs meaningless; (b) the trace score wanders up to **5 steps on one question**,
+  so C's "21 -> 27" sits inside the noise and the judge now scores the median of 3 repeats.
+
+## Status (2026-10-09): improving the Coder, 1 of 7 experiments done
 **Next session: read [docs/CODER_HANDOVER.md](docs/CODER_HANDOVER.md) first.** It has the state, how
 to run the benchmark, the order to work in (D -> A -> B -> E -> F -> G, then combine) and the traps.
 - `scripts/coder_bench.py` is the judge: same questions every run, saved per variant

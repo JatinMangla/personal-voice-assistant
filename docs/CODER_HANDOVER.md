@@ -4,17 +4,26 @@ For the next Claude Code session. Read [CLAUDE.md](../CLAUDE.md) first (it is th
 handover), then this file, then [CODER_IMPROVEMENTS.md](CODER_IMPROVEMENTS.md) (the experiment plan
 and the result table). The full history is in [PROJECT_LOG.md](PROJECT_LOG.md).
 
-**The job:** work through the remaining experiments (D, A, B, E, F, G) one at a time, measure each
-one with the benchmark, keep only what the numbers justify, then combine the keepers and measure
-again. Everything is already built and pushed; nothing is half-finished.
+**The job:** A is done and kept, D is measured and parked, B is fixed and working, E and the agentic
+`investigate` are built but **not yet measured**. What is left: measure E and `investigate`, then F
+(the 14B) and G, then combine the keepers. Read the two "trap" sections of CODER_IMPROVEMENTS.md
+before you measure anything -- they invalidated three runs in the last session.
 
-## State at handover (2026-10-09)
+## State at handover (2026-10-09, second session)
 
-- `main` is clean at **582b810**, pushed; **587 tests pass** (`.venv\Scripts\python -m pytest tests`).
-- The Coder **works on Kaggle**: ready in ~6.5 min, reading ~1060 tok/s, writing ~59 tok/s,
-  `ask_repo` 5-7 s. Model `qwen3-coder:30b` on both T4s, reranker on GPU 1.
-- Experiment **C is done and kept** (repo map in the prompt): traces **21/30 -> 27/30**.
-- Experiments **D, A, B, E, F, G are not started.**
+- `main` is clean at **23d1ed5** (NOT pushed: pushing deploys to Kaggle, the owner decides when);
+  **643 tests pass** (`.venv\Scripts\python -m pytest tests`).
+- **Done and kept: A** (house style for drafts + the refs rule). `ask_repo` is at the ceiling,
+  **14/14 named and 14/14 refs**, reproduced in two runs, at no extra cost.
+- **Parked: D** (`CODER_FOLLOWUP=1` to switch on). It works now, on an objective trigger, but costs
+  ~35 % more GPU time per question and never helped an `ask` question.
+- **Fixed and on: B** (`CODER_SELFTEST`, default on). It caught the real `slugify` bug on its first try.
+- **Built, NEVER measured: E** (`CODER_NOTES`, default on) and **`investigate`** (the agentic loop).
+  `scratchpad/compare_investigate.py` in the last session's temp folder was written for this but
+  never run (the GPU budget ran out); rewrite it as `scripts/` code if you want to keep it.
+- **GPU budget:** at the end of that session today's meter was at **92 %, ~15 min left**, resetting
+  at midnight IST. Each Coder start costs ~6.5 min, each benchmark run ~4 min of model time, and a
+  run with `--trace-repeats 3` costs ~6-7 min. Plan the day before pressing Start Coder.
 - The owner's `CODER_KEY` is in their password manager, a GitHub secret, and their Windows user
   variable. Key fingerprint `886c40a5` (the Kaggle log prints the same if they match).
 
@@ -22,13 +31,34 @@ again. Everything is already built and pushed; nothing is half-finished.
 
 ```
 .venv\Scripts\python scripts\coder_bench.py --list
-baseline    ask 13/14 named, 12/14 refs | trace 21/30 | draft 6/6 (style 5.33/6) | summarize 3/3 | 28 calls,  61.5k+4.7k tok, 152 s
-C-repomap   ask 12/14 named, 12/14 refs | trace 27/30 | draft 6/6 (style 5.17/6) | summarize 3/3 | 28 calls, 125.7k+5.4k tok, 222 s
+baseline     ask 13/14 named, 12/14 refs | trace 21/30 | draft 6/6 (style 5.33) | 28 calls,  61.5k+4.7k tok, 152 s
+C-repomap    ask 12/14 named, 12/14 refs | trace 27/30 | draft 6/6 (style 5.17) | 28 calls, 125.7k+5.4k tok, 222 s
+D-followup   ask 12/14 named, 12/14 refs | trace 26/30 | draft 6/6 (style 5.67) | 28 calls, 128k+5.0k tok, 227 s  <- measured nothing, see below
+D2-bluff     ask 14/14 named, 14/14 refs | trace 23/30 | draft 6/6 (style 5.33) | 30 calls, 161k+6.4k tok, 300 s
+A-style      ask 14/14 named, 14/14 refs | trace 23/30 | draft 6/6 (style 5.67) | 28 calls, 129k+5.1k tok, 216 s  <- the keeper
+AB-selftest  ask 14/14 named, 14/14 refs | trace 23/30 | draft 6/6 (style 5.5)  | 28 calls, 131k+5.0k tok, 211 s  <- B was inert here too
+AB2-selftest-works  ask 14/14, 14/14 refs | trace 24/30 (median of 3, spread 2) | draft 6/6 (style 5.83) | 37 calls, 209k+10.6k tok, 402 s  <- CURRENT DEFAULT (A+B+C)
 ```
-Both lines print "safety FAIL": that is **two false alarms from the probes themselves**, both since
-fixed and verified by hand (nothing escapes the folder; an honest "there is no such code" answer was
-being failed by a word match). The next run prints the corrected result. **If safety ever reads FAIL
-again, check the probe before believing it, and never ship a change until it reads pass.**
+**The current default is A + B + C.** Against the baseline: ask 13 -> **14/14** named, refs 12 ->
+**14/14**, draft style 5.33 -> **5.83/6**, drafts still 6/6 but now self-repairing. In the AB2 run
+only **+2 of the 37 calls** were B (8 calls for 6 drafts, vs 6 without it); the other 6 extra calls
+are the new 3x trace repeats, not a feature. `ask_repo` and draft style are at this benchmark's
+ceiling - the open ground is the cross-file trace, where the metric itself is now the limitation.
+Safety now reads **pass** in every run (the two old "FAIL" lines were the probes' own wording).
+**If safety ever reads FAIL again, check the probe before believing it, and never ship a change
+until it reads pass.**
+
+### Read this before you trust any of those numbers
+
+Three runs in that list measured nothing, for two reasons that will bite again:
+1. **Ollama fills only the schema fields listed in `required`.** `test` (B) and `need` (D) were
+   optional, so the model never returned them: `D-followup` and `AB-selftest` are therefore repeats
+   of earlier runs, not measurements. Any new field goes in `required`, and you check the first real
+   reply contains it before spending a run.
+2. **The trace score wanders by up to 5 steps on one question** (10, 7, 7, 6, 5 on the same question
+   across five runs; totals 21-27). C's famous "21 -> 27" sits inside that spread. The benchmark now
+   asks each trace question 3 times and scores the **median**, printing the spread; use `ask`, `refs`,
+   `drafts`, `summarize`, `safety` and cost for verdicts, and treat a single trace number as a hint.
 
 ## How to run the benchmark (the judge)
 
@@ -56,49 +86,40 @@ Each experiment: build it **behind a switch**, run the benchmark, write the numb
 into the table in CODER_IMPROVEMENTS.md, commit. Keep it only if its target number improves **and
 nothing else gets worse, safety included**. If it does not help, say so in the doc so nobody retries it.
 
-### 1. D - let the model ask for a file (biggest remaining gain)
-The 3 trace steps still missed are all "the answer is in a file search did not rank highly".
-Allow **one** extra round: if the model replies `{"need": ["src/coder_proxy.py", ...]}` or its
-confidence is low, fetch those files through the normal safety checks (`service._resolve_source`)
-and ask once more. Hard cap of one extra round so cost cannot run away. Switch `CODER_FOLLOWUP=0`.
-Target: traces 27/30 -> 30/30, `ask` not worse. Watch: time on the questions that use it.
+### DONE: A (kept), D (parked), B (fixed and on)
+Nothing to redo here. A reached `ask` 14/14 named + 14/14 refs twice; D is behind
+`CODER_FOLLOWUP=1` on cost; B caught the real `slugify` bug once its schema was fixed. The details,
+including why the first B and D runs measured nothing, are in CODER_IMPROVEMENTS.md.
 
-### 2. A - style, and the two wrong refs
-Style is already 5.17/6; the misses are specific and mechanical: obvious comments
-("# Lowercase the text"), too many comments, one `Args:/Returns:` docstring. Add a short style block
-for drafts (comments say *why* not *what*, plain English, no emoji, match the surrounding code, no
-docstring that restates the signature) plus 2-3 real files from this repo as examples. Switch
-`CODER_STYLE=0`.
-**Fold in the refs fix:** two answers were right but gave "Refs: none given" or cited a neighbouring
-file. Tell the prompt that every answer must cite a file it was actually shown, and that the repo
-map is a list of what exists, not of what it has read (C's two losses were exactly this confusion).
-Target: style >= 5.8/6, refs 14/14, traces unchanged.
+### 1. Measure `investigate`, the agentic loop (built, never measured)
+It plans a hard question into <= 5 sub-questions, searches and answers each separately, then writes
+one answer showing its steps (`coder.investigate`, MCP tool `investigate`, 12 tests). The benchmark
+does not call it, so judge it against `ask_repo` **on the same trace questions, repeated**: the trace
+score wanders too much for one pass each. Roughly 18 model calls / ~8 min of GPU for 3 repeats of
+both methods, so do it first in a fresh session when the budget is full.
+Target: it should beat `ask_repo` on the trace medians by more than the spread, and its cost
+(1 call per step + 2) has to be worth it. If it does not beat `ask_repo`, say so in the doc: it is
+still the honest answer to "work like agentic AI", and its steps make the work checkable.
 
-### 3. B - drafts write and run their own tests
-Lower priority than it looked: drafts score **6/6** including the harder specs, so there is little
-room. Build it as insurance and judge it on cost: the draft returns code **and** its own tests, they
-run in a temporary copy (never the owner's files; the project's own suite stays behind
-`CODER_RUN_TESTS`), and on failure the error goes back for up to 2 fixes. Switch `CODER_SELFTEST=0`.
-Keep **off by default** unless it is nearly free, since it multiplies model calls per draft.
+### 2. Measure E - remembered corrections (built, never measured)
+`CODER_NOTES` (on). Rating an answer `bad` with a correction stores it, and a later similar question
+(plain word overlap >= 0.34, at most 3 notes) carries "a previous answer to a question like this was
+marked WRONG". The benchmark has no history, so measure it by hand: ask something, rate it bad with
+the right answer, ask again in other words, and check the note reaches the prompt and changes the
+reply. Watch that an unrelated question is NOT warned.
 
-### 4. E - remember corrections (learning without training)
-A rated-bad answer currently teaches the system nothing. Store the question and (optionally) the
-correction; show it as a note when a similar question comes back ("you got this wrong before: ...").
-Reuse the ratings table and the embedding search. The benchmark has no history, so measure it by
-replaying the two real bad answers in `~/.jarvis-coder/cache.db`. Switch `CODER_NOTES=0`.
-
-### 5. F - 14B versus 30B, measured (information, not an improvement)
+### 3. F - 14B versus 30B, measured (information, not an improvement)
 Same benchmark with `PVA_CODER_MODEL=qwen2.5-coder:14b`. Tells us what a future LoRA would cost in
 quality, since fine-tuning would realistically have to be the 14B (gotcha 7: a tuned Qwen3.5 would
 not load in Ollama, and the 30B is mixture-of-experts). Costs a full start-up (~6 min of GPU time).
 
-### 6. G - other projects and branches
+### 4. G - other projects and branches
 Already supported by `CODER_ALLOWED_DIRS` (folders separated by `;`). Add a git-worktree recipe to
 the README and make answers name which project a file belongs to. **Do not add company/office code**
 unless the owner confirms their employer allows that code to leave the laptop (Kaggle is Google,
 plus ngrok). The owner was told this and has not confirmed.
 
-### 7. Combine and re-measure
+### 5. Combine and re-measure
 Run the suite with all keepers on. If the combination is worse than the best single change, find
 which pair fights and keep the better one. Then update the table, CLAUDE.md and PROJECT_LOG.md.
 
@@ -139,7 +160,7 @@ Only after D-G are measured, and only if the numbers ask for it:
 
 - Not a developer by trade: give **click-by-click** steps for anything on GitHub/Kaggle, and say
   *why* in plain words. They paste logs back.
-- Priorities: security and privacy, then speed, then **₹0 cost, always**.
+- Priorities: security and privacy, then speed, then **â‚¹0 cost, always**.
 - Free GPU budget is ~4.3 h/day shared with Jarvis. Each Coder start costs ~6.5 min before any work.
   Tell them what a plan will cost in GPU minutes before spending it.
 - They asked to be **warned before the daily limit ends a run**: that is built (every answer can
