@@ -28,6 +28,8 @@ WIDE_MIN_WORDS = 30
 MAX_UNVERIFIED = 6
 DEEP_POOL = 30
 MIN_VECTOR_COVERAGE = 0.5
+MAP_PROMPT_SYMBOLS = 6       # names per file in the map that goes INTO the prompt (experiment C)
+MAP_CACHE_SEC = 120.0        # the map is rebuilt from the index at most this often
 MAX_READ_BYTES = 5_000_000
 MAX_CONTEXT_FILES = 6
 MAX_CONTEXT_CHARS = 30_000
@@ -55,6 +57,7 @@ class Coder:
         self.cache = Cache(home / "cache.db")
         self.client = CoderClient.from_env() if client is _FROM_ENV else client
         self.last_activity = time.time()   # the idle pre-computing waits for quiet
+        self._map: tuple[float, str] | None = None   # (built at, text) for the prompt's repo map
 
     def touch(self) -> None:
         self.last_activity = time.time()
@@ -115,6 +118,24 @@ class Coder:
         return "\n".join(out)
 
     # --- tools that use the coder model ----------------------------------------------------
+    def prompt_map(self) -> str:
+        """The repo map as it goes into the prompt (experiment C): one short line per file, the
+        file's own summary when the Coder has written one, else its first few names. Byte-identical
+        between calls within MAP_CACHE_SEC, so Ollama can reuse the cached prompt prefix.
+        CODER_REPO_MAP=0 switches it off."""
+        if os.environ.get("CODER_REPO_MAP", "1") == "0":
+            return ""
+        now = time.time()
+        if self._map and now - self._map[0] < MAP_CACHE_SEC:
+            return self._map[1]
+        lines = []
+        for r in self.index.files():
+            shown = r["summary"] or ", ".join(self.index.symbols(r["path"])[:MAP_PROMPT_SYMBOLS])
+            lines.append(f"{self.index.display(r['path'])} ({r['lines']}L): {shown}".rstrip(": "))
+        text = "\n".join(lines)
+        self._map = (now, text)
+        return text
+
     def ask_repo(self, question: str) -> str:
         """Answer a question about the code from the best matching pieces (the Coder reads them
         so Claude doesn't have to). Same question + unchanged files = instant cached answer."""
@@ -131,7 +152,7 @@ class Coder:
             hits = self._deep_search(question, self._chunks_for(question))
             if not hits:
                 return "No matching code found."
-            result = tasks.ask(self.client, question, hits)
+            result = tasks.ask(self.client, question, hits, repo_map=self.prompt_map())
         except Offline:
             return self._without_coder(question, OFFLINE_NOTE)
         except CoderError as e:

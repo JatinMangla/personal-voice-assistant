@@ -664,3 +664,67 @@ def test_a_wide_question_sends_more_pieces_to_the_model(repo, tmp_path):
     coder.ask_repo("Trace step by step what happens when the start button is pressed")
     sent = "".join(m["content"] for m in fake.chats[0])
     assert sent.count("<file path=") > service.ASK_CHUNKS
+
+
+# --- experiment C: the repo map in the prompt (docs/CODER_IMPROVEMENTS.md) -------------------------
+def test_the_repo_map_is_sent_with_the_question_and_can_be_switched_off(repo, tmp_path, monkeypatch):
+    fake = FakeClient([ANSWER, ANSWER])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("which meter stops the start?")
+    system = fake.chats[0][0]["content"]
+    assert "<repo_map>" in system and "src/budget.py" in system and "start_blocker" in system
+    assert "never name anything absent from this list" in system
+    monkeypatch.setenv("CODER_REPO_MAP", "0")
+    coder._map = None
+    coder.cache.conn.execute("DELETE FROM answers")        # ask the model again, not the cache
+    coder.cache.conn.commit()
+    coder.ask_repo("which meter stops the start?")
+    assert len(fake.chats) == 2 and "<repo_map>" not in fake.chats[1][0]["content"]
+
+
+def test_the_map_is_identical_between_calls_so_ollama_can_cache_it(repo, tmp_path):
+    """Ollama only reuses a cached prompt prefix if it is byte-identical, so the map must not
+    change between questions within its cache window."""
+    second = {**ANSWER, "answer": "a different answer"}
+    fake = FakeClient([ANSWER, second])
+    coder = make(repo, tmp_path, fake)
+    coder.ask_repo("where is the start blocker")
+    coder.ask_repo("what does over_stop return")      # also in this fixture's budget.py
+    assert len(fake.chats) == 2
+    assert fake.chats[0][0]["content"] == fake.chats[1][0]["content"]
+    assert fake.chats[0][1]["content"] != fake.chats[1][1]["content"]   # only the question changed
+
+
+def test_the_map_prefers_a_written_summary_over_bare_names(repo, tmp_path):
+    coder = make(repo, tmp_path, FakeClient())
+    coder.index.refresh()
+    key = next(r["path"] for r in coder.index.files() if r["path"].endswith("budget.py"))
+    assert "start_blocker" in coder.prompt_map()
+    coder.index.set_summary(key, "Free-limit meters and the auto-stop.", coder.index.file_hash(key))
+    coder._map = None
+    line = next(l for l in coder.prompt_map().splitlines() if "budget.py" in l)
+    assert line.endswith("Free-limit meters and the auto-stop.") and "L):" in line
+
+
+def test_a_huge_map_is_shortened_but_still_lists_every_file():
+    """150 files with long name lists: the names get cut, every path stays."""
+    lines = [f"src/module{i}.py (120L): " + ", ".join(f"function_with_a_long_name_{j}" for j in range(12))
+             for i in range(150)]
+    out = tasks.shrink_map("\n".join(lines), limit=14_000)
+    assert len(out) <= 14_000
+    assert out.count("\n") + 1 == 150                     # no file was dropped
+    assert "src/module0.py" in out and "src/module149.py" in out
+    assert "..." in out and "more files not listed" not in out
+
+
+def test_an_absurd_map_drops_files_last_and_says_how_many():
+    lines = [f"src/a_very_long_path_number_{i}/and_a_file_name_{i}.py (9L): names" for i in range(2000)]
+    out = tasks.shrink_map("\n".join(lines), limit=3_000)
+    assert len(out) <= 3_000 and "more files not listed" in out
+    assert "src/a_very_long_path_number_0" in out
+
+
+def test_system_text_without_a_map_is_unchanged():
+    assert tasks.system_text("") == tasks.SYSTEM
+    assert tasks.system_text("   ") == tasks.SYSTEM
+    assert tasks.system_text("src/x.py (3L): f").startswith(tasks.SYSTEM)

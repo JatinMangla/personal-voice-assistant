@@ -77,6 +77,21 @@ the question touches if it is too long. Switch: `CODER_REPO_MAP=0`.
 **Expect:** fewer invented names on cross-file questions; prompt tokens up, prefill time flat
 (cached prefix).
 
+**C: kept.** Traces **21/30 -> 27/30**, the biggest single gain measured so far: question 1 went
+7/10 -> **10/10** (it had been missing the secrets upload, `kernels push` and the notebook, all
+files search never showed) and question 2 6/10 -> 9/10. `ask` 13 -> 12 named is a wash, not a
+regression: two questions got **better** (the idle timeout and `no_emoji`, which gained its refs)
+and two got worse (`traffic_policy` and `shrink`, where the map's one-line description pulled the
+answer towards a neighbouring file). Style and drafts unchanged, safety unchanged. The price is
+real: prompt tokens 61.5k -> 126k and `ask` median 4.9 s -> 6.8 s, because the ~14k-char map is sent
+with every question; Ollama caches the prefix, so the cost is mostly its one-off read per session.
+Worth it for a 6-step gain. Next: see whether D (follow-up questions) closes the remaining 3 steps,
+and whether naming the file in the map's line (C's two losses) can be sharpened in A.
+
+Also fixed here: the benchmark's "no invention for missing code" probe only looked for "not" in the
+first 200 characters, so it failed a perfectly honest answer that began "there is no explicit code
+for...". It now accepts any honest denial and still catches an invented function name.
+
 ### D. The model may ask for more code
 **Fixes:** the trace 8/10 — the file holding the answer was not among the pieces shown.
 **Build:** allow one extra round: if the model answers `{"need": ["coder_proxy.py", ...]}` or its
@@ -126,6 +141,7 @@ Measured with `scripts/coder_bench.py --name <variant>`; `--list` and `--compare
 | Variant | ask_repo | trace | draft | style | summarize | safety | cost | verdict |
 |---|---|---|---|---|---|---|---|---|
 | **baseline** (2026-10-09) | 13/14 named, **12/14 refs** | **21/30** | **6/6** | **5.33/6** | 3/3 | pass | 28 calls, 61.5k+4.7k tok, 152 s | reference |
+| **C repo map** (2026-10-09) | 12/14 named, 12/14 refs | **27/30** | 6/6 | 5.17/6 | 3/3 | pass | 28 calls, **126k**+5.4k tok, 222 s | **KEPT** |
 | A style | | | | | | | | |
 | B self-test | | | | | | | | |
 | C repo map | | | | | | | | |
