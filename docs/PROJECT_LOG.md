@@ -556,6 +556,24 @@ run on Kaggle or a device yet.
   scored (the tell was `0 calls, 0s`); `coder_compare_methods.py` now refuses to score a pass that
   made no model call. 655 tests.
 
+- 2026-10-12 (later: the last two plan items, F and G). **G works and was hiding a real bug.**
+  Checked offline with two projects that define the *same function name*: both are found, every hit
+  carries its project prefix, each project is searchable on its own wording, `repo_map` narrows to
+  one, and a draft must name the project (`src/new.py` with two roots is refused, so is
+  `../escape.py`). The bug: `service._resolve_source` only ever tried `self.roots[0] / source`, so a
+  file in **any folder but the first could not be read at all** - and the `<project>/rest` form it
+  refused is the only name `index.display()` ever prints, so `summarize`, a draft's `context_paths`
+  and D's follow-up silently refused every second-project file. Fixed, with a test that the prefix
+  resolves only inside the project it names and cannot escape. My first hand-check of this printed
+  `True` and hid the bug; the proper assertion caught it - **hand-checks print, tests assert.**
+  **F was not runnable as planned.** "Just set `PVA_CODER_MODEL`" would have measured the 30B twice
+  and looked like a 14B run: `config.CODER_MODEL` is read at import, and a Start-button run has no
+  environment and gets no Kaggle Secrets (gotcha 8). **Start Coder** now has a `model` dropdown (30B
+  default, 14B the only alternative), the value rides in the encrypted bundle, and
+  `coder_main.wanted_models()` reads it at call time, keeps the other model as the fallback and
+  ignores an unknown name rather than wasting a start-up. F itself is still unrun (one start-up plus
+  one benchmark); the README gained the `CODER_ALLOWED_DIRS` and `git worktree` recipe. 670 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

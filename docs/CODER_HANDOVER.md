@@ -116,7 +116,21 @@ including why the first B and D runs measured nothing, are in CODER_IMPROVEMENTS
   questions: 4/4 realistic rephrasings warned, 0 false warnings; 0.25 and below start confusing
   "spoken yes or no" with "spoken due time". A full synonym rewrite will not match, and that is
   accepted -- a missed warning is free, a false one teaches the model something untrue.
-- Remaining from the original plan: **F** (14B versus 30B) and **G** (other projects/branches) only.
+- **G is done** (other projects/branches): verified with two projects defining the same function
+  name -- both are found, each hit names its project, `repo_map` narrows, and a draft must name the
+  project. It uncovered a real bug: `_resolve_source` only tried the FIRST allowed folder, so files
+  in any other project were unreadable; fixed, with an escape test. README has the `git worktree`
+  recipe.
+- **F is now runnable but still never run.** The plan's "just set `PVA_CODER_MODEL`" could not work
+  (import-time constant, and a button run has no environment and no Kaggle Secrets), so it would
+  have silently measured the 30B twice. **Start Coder** now has a `model` dropdown; the value travels
+  in the secrets bundle and `wanted_models()` reads it at call time. **To actually run F:** Start
+  Coder -> choose `qwen2.5-coder:14b`, check the Kaggle log says
+  `[coder] model from the run's settings: qwen2.5-coder:14b`, then
+  `coder_bench.py --name F-14b` and compare with `A-style`/`AB2-selftest-works`. One start-up
+  (~6.5 min) plus a run (~7 min with 3 trace repeats). It buys information, not quality: the point
+  is to know what a future LoRA on the 14B would cost in answer quality.
+- Nothing else is outstanding from the original plan.
 
 ### 1. (closed) Measure `investigate`, the agentic loop
 It plans a hard question into <= 5 sub-questions, searches and answers each separately, then writes

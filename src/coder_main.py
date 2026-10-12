@@ -163,11 +163,32 @@ def create_alias(base: str) -> None:
         raise RuntimeError(f"ollama create failed: {result.stderr.strip()[-200:]}")
 
 
+def wanted_models() -> tuple[str, ...]:
+    """Which model to try first, then the fallback. `config.CODER_MODEL` is frozen at import from
+    the environment, which a Start-button run does not have; experiment F needs to compare the 30B
+    with the 14B, so the choice is also read from the run's secrets bundle (`PVA_CODER_MODEL`)
+    here, at call time. An unknown name is ignored rather than failing the whole run."""
+    chosen = config.CODER_MODEL
+    try:
+        from_bundle = config.get_secret("PVA_CODER_MODEL", required=False)
+    except Exception:
+        from_bundle = None
+    if from_bundle:
+        name = from_bundle.strip()
+        if name in (config.CODER_MODEL, config.CODER_FALLBACK_MODEL):
+            chosen = name
+            print(f"[coder] model from the run's settings: {chosen}")
+        else:
+            print(f"[coder] ignoring an unknown PVA_CODER_MODEL; using {chosen}")
+    others = tuple(m for m in (config.CODER_MODEL, config.CODER_FALLBACK_MODEL) if m != chosen)
+    return (chosen, *others)
+
+
 def load_coder_model(pull) -> str:
     """Download, load and test the coder model; the smaller one if the first fails. Prints the
     speed numbers (load, reading and writing tokens per second). Returns the model used."""
     last_error = "no model tried"
-    for base in (config.CODER_MODEL, config.CODER_FALLBACK_MODEL):
+    for base in wanted_models():
         t = time.time()
         try:
             config.PHASE = f"downloading {base}"

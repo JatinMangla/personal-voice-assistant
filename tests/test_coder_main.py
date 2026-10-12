@@ -296,3 +296,50 @@ def test_health_publishes_the_warning_and_the_client_passes_it_on():
     live.update(note)
     assert client.online()
     assert client.warning_line() == "\nFree limit: today's GPU time is at 94%; about 12 min left."
+
+
+# --- experiment F: the Start button chooses the model -------------------------------------------
+def test_the_30b_is_tried_first_by_default(monkeypatch):
+    monkeypatch.setattr(config, "get_secret", lambda name, required=True: None)
+    assert coder_main.wanted_models() == (config.CODER_MODEL, config.CODER_FALLBACK_MODEL)
+
+
+def test_the_run_can_ask_for_the_14b_and_the_30b_becomes_the_fallback(monkeypatch):
+    """Experiment F compares the two. config.CODER_MODEL is frozen at import from an environment a
+    Start-button run does not have, so the choice has to come from the run's secrets bundle."""
+    monkeypatch.setattr(config, "get_secret",
+                        lambda name, required=True: config.CODER_FALLBACK_MODEL
+                        if name == "PVA_CODER_MODEL" else None)
+    assert coder_main.wanted_models() == (config.CODER_FALLBACK_MODEL, config.CODER_MODEL)
+
+
+@pytest.mark.parametrize("value", ["llama3:70b", "../etc/passwd", "", "   ", "qwen3-coder:30b-x"])
+def test_an_unknown_model_name_is_ignored_not_obeyed(monkeypatch, value):
+    """A wrong name must not waste a start-up pulling something huge or nonexistent."""
+    monkeypatch.setattr(config, "get_secret",
+                        lambda name, required=True: value if name == "PVA_CODER_MODEL" else None)
+    assert coder_main.wanted_models()[0] == config.CODER_MODEL
+
+
+def test_a_broken_secrets_bundle_does_not_stop_the_run(monkeypatch):
+    def boom(name, required=True):
+        raise RuntimeError("no bundle here")
+    monkeypatch.setattr(config, "get_secret", boom)
+    assert coder_main.wanted_models() == (config.CODER_MODEL, config.CODER_FALLBACK_MODEL)
+
+
+def test_the_model_is_passed_through_the_start_script_and_the_workflow():
+    import yaml
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    start = (root / "scripts" / "start_coder.py").read_text(encoding="utf-8")
+    assert "PVA_CODER_MODEL" in start, "the start script must carry the model into the bundle"
+
+    raw = (root / ".github" / "workflows" / "start-coder.yml").read_text(encoding="utf-8")
+    data = yaml.safe_load(raw)
+    trigger = next(data[k] for k in data if str(k) in ("on", "True"))
+    model = trigger["workflow_dispatch"]["inputs"]["model"]
+    assert model["default"] == config.CODER_MODEL, "the 30B must stay the default"
+    assert set(model["options"]) == {config.CODER_MODEL, config.CODER_FALLBACK_MODEL}
+    env = next(step["env"] for step in data["jobs"]["start"]["steps"] if "env" in step)
+    assert "PVA_CODER_MODEL" in env

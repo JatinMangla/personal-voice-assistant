@@ -27,7 +27,7 @@ import start_jarvis as sj  # noqa: E402
 KEY_CHARS = re.compile(r"[A-Za-z0-9_=-]+")   # what make_key.py prints (URL-safe base64)
 REQUIRED = ["KAGGLE_USERNAME", "KAGGLE_API_TOKEN", "MEMORY_KEY", "NGROK_AUTHTOKEN",
             "NGROK_DOMAIN", "CODER_KEY"]
-OPTIONAL = ["CODER_FORCE"]
+OPTIONAL = ["CODER_FORCE", "PVA_CODER_MODEL"]   # the model lets experiment F compare 30B with 14B
 MIN_KEY_LENGTH = 32
 
 

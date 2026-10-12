@@ -354,8 +354,19 @@ class Coder:
         return pieces, names
 
     def _resolve_source(self, source: str) -> Path | None:
-        """A path (absolute, or relative to the first allowed folder) that is allowed to be read."""
-        for candidate in (Path(source), self.roots[0] / source):
+        """A readable path inside the allowed folders. Accepts an absolute path, one relative to a
+        root, and -- when several folders are indexed -- the `<project>/rest` form that `index.display`
+        prints, which is the only name the model and the owner ever see for a second project.
+
+        Found 2026-10-12: without that last form, files in every folder but the first were simply
+        unreachable, so `summarize`, a draft's context and D's follow-up silently refused them.
+        """
+        clean = source.replace("\\", "/").strip().lstrip("/")
+        candidates = [Path(source)] + [root / clean for root in self.roots]
+        if len(self.roots) > 1:
+            head, _, rest = clean.partition("/")
+            candidates += [root / rest for root in self.roots if root.name == head and rest]
+        for candidate in candidates:
             try:
                 allowed = safety.resolve_allowed(candidate, self.roots)
             except (OSError, ValueError):

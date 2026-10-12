@@ -10,6 +10,13 @@ on:
         description: "Start a new run even if Kaggle says the Coder or Jarvis is already running"
         type: boolean
         default: false
+      model:
+        description: "Which coding model (the 14B is only for comparing quality and speed)"
+        type: choice
+        default: "qwen3-coder:30b"
+        options:
+          - "qwen3-coder:30b"
+          - "qwen2.5-coder:14b"
 
 permissions:
   contents: read
@@ -35,3 +42,4 @@ jobs:
           CODER_NOTEBOOK: ${{ vars.CODER_NOTEBOOK || 'coder' }}
           JARVIS_NOTEBOOK: ${{ vars.JARVIS_NOTEBOOK || 'jarvis' }}
           CODER_FORCE_START: ${{ inputs.force }}
+          PVA_CODER_MODEL: ${{ inputs.model }}

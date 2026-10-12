@@ -270,6 +270,27 @@ models:
 ### Safety (what to know)
 
 - Only the folders in `CODER_ALLOWED_DIRS` (default: this repository) are ever read, and never secret files (`.env`, `*.enc`, keystores, `kaggle.json`, names containing `secret`/`password`...). **Do not add office/company folders** unless your company allows sending that code to Kaggle (Google) and ngrok.
+
+### Asking about another project, or another branch
+
+Set the user variable `CODER_ALLOWED_DIRS` to the folders you want, separated by `;`, then reopen VS Code:
+
+```
+CODER_ALLOWED_DIRS=D:\git\personal voice assistant;D:\git\my-other-project
+```
+
+Every answer then says which project a file is in (`my-other-project/src/app.py`), each project is searched on its own wording, and a draft has to name the project in its path, so it can never write into the wrong one.
+
+**To compare two branches of the same repo**, give git a second working folder instead of switching branches back and forth (your main folder stays exactly as it is):
+
+```
+cd "D:\git\personal voice assistant"
+git worktree add ..\pva-old-branch main      # a second folder on the branch you want
+# then add it:  CODER_ALLOWED_DIRS=D:\git\personal voice assistant;D:\git\pva-old-branch
+git worktree remove ..\pva-old-branch        # when you are done
+```
+
+Then you can ask things like "how does the turn flow differ between the two folders". Each extra folder makes the index and the repo map bigger, so add only what you are actually asking about.
 - The model's answers are treated as untrusted. `draft_code` never writes files; it shows a draft after checking paths, syntax and lint. Running the project's tests on a draft is **off** by default (it would run model-written code on this PC); turn it on with the user variable `CODER_RUN_TESTS=1` if you want it. It runs in a temporary copy, never in your real files.
 - **The draft also writes a few checks of its own, and those do run** (that is how a wrong answer gets caught before you see it). They are kept in a cage: an empty temporary folder holding nothing but the draft, only harmless imports allowed (no `os`, `subprocess`, `socket`...), no `open`, `exec` or `eval`, no network, and a 25-second limit. Anything outside that is **refused, not run**, and the draft is still shown to you. Switch the whole thing off with `CODER_SELFTEST=0` if you prefer.
 - When you rate an answer **bad**, you can add what the right answer was. That correction is stored on this laptop only (in `~/.jarvis-coder`) and is shown to the model next time you ask something similar, so the same mistake is not repeated. `CODER_NOTES=0` switches it off.

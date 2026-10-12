@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from coder import cache as cache_mod
-from coder import chunk, safety, search, service
+from coder import chunk, safety, search, selfcheck, service
 from coder.index import Index
 
 PY = '''import os
@@ -336,3 +336,91 @@ def test_the_judge_penalty_is_the_harshest_one():
         assert search.JUDGE_PATH.search(name), name
     for name in ("src/coder_main.py", "scripts/coder/search.py", "benchmarks/mine.py"):
         assert not search.JUDGE_PATH.search(name), name
+
+
+# --- G: two projects (or a branch worktree) side by side ----------------------------------------
+TWO_A = '''def start_blocker(meters):
+    """Which meter forbids starting right now."""
+    return next((m for m in meters if m.used >= 5), None)
+'''
+TWO_B = '''def start_blocker(limits):
+    """The quota that prevents a launch at this moment."""
+    return limits[0] if limits else None
+'''
+
+
+@pytest.fixture
+def two_projects(tmp_path):
+    one = (tmp_path / "jarvis").resolve()
+    two = (tmp_path / "other-project").resolve()
+    for root, code in ((one, TWO_A), (two, TWO_B)):
+        (root / "src").mkdir(parents=True)
+        (root / "src" / "budget.py").write_text(code, encoding="utf-8")
+    return one, two
+
+
+def test_a_hit_says_which_project_it_is_in(two_projects, tmp_path):
+    """With CODER_ALLOWED_DIRS holding several folders (another repo, or a git worktree of another
+    branch), an answer that did not name the project would be useless."""
+    one, two = two_projects
+    coder = service.Coder(tmp_path / "home", [one, two])
+    coder.index.refresh()
+    hits = search.search(coder.index, "start_blocker", 8)
+    paths = [h["path"] for h in hits]
+    assert "jarvis/src/budget.py" in paths and "other-project/src/budget.py" in paths
+    assert all(p.split("/")[0] in ("jarvis", "other-project") for p in paths)
+
+
+def test_each_project_is_searchable_on_its_own_wording(two_projects, tmp_path):
+    one, two = two_projects
+    coder = service.Coder(tmp_path / "home", [one, two])
+    coder.index.refresh()
+    only_two = search.search(coder.index, "quota that prevents a launch", 5)
+    assert only_two and only_two[0]["path"].startswith("other-project/")
+    only_one = search.search(coder.index, "which meter forbids starting", 5)
+    assert only_one and only_one[0]["path"].startswith("jarvis/")
+
+
+def test_repo_map_can_be_narrowed_to_one_project(two_projects, tmp_path):
+    one, two = two_projects
+    coder = service.Coder(tmp_path / "home", [one, two])
+    coder.index.refresh()
+    text = coder.repo_map("other-project")
+    assert "other-project/src/budget.py" in text and "jarvis/" not in text
+
+
+def test_a_draft_must_name_the_project_and_cannot_escape(two_projects):
+    one, two = two_projects
+    roots = [one, two]
+    for allowed, expected in (("jarvis/src/new.py", one), ("other-project/src/new.py", two)):
+        got = selfcheck.target_path(allowed, roots)
+        assert got and got[0] == expected, allowed
+    for refused in ("src/new.py", "../escape.py", "nope/src/new.py", "/abs/new.py"):
+        assert selfcheck.target_path(refused, roots) is None, refused
+
+
+def test_a_file_is_only_read_through_its_own_project_name(two_projects, tmp_path):
+    one, two = two_projects
+    coder = service.Coder(tmp_path / "home", [one, two])
+    coder.index.refresh()
+    assert coder._resolve_source("jarvis/src/budget.py") is not None
+    assert coder._resolve_source("other-project/src/budget.py") is not None
+    assert coder._resolve_source("../outside.py") is None
+
+def test_a_project_prefix_cannot_be_used_to_reach_somewhere_else(two_projects, tmp_path):
+    """The prefixed form must resolve ONLY inside the project it names, and never escape."""
+    one, two = two_projects
+    (one / "src" / "only_in_one.py").write_text("x = 1\n", encoding="utf-8")
+    (two / "secretish.py").write_text("y = 2\n", encoding="utf-8")
+    coder = service.Coder(tmp_path / "home", [one, two])
+    coder.index.refresh()
+
+    got = coder._resolve_source("jarvis/src/only_in_one.py")
+    assert got and got.parent.parent == one
+    # project two's name must not fetch project one's file
+    assert coder._resolve_source("other-project/src/only_in_one.py") is None
+    for escape in ("jarvis/../other-project/secretish.py", "jarvis/../../outside.py",
+                   "../escape.py", "jarvis/.env", "nope/src/budget.py"):
+        resolved = coder._resolve_source(escape)
+        assert resolved is None or any(
+            str(resolved).startswith(str(r)) for r in (one, two)), escape

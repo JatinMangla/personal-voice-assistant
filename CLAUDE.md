@@ -364,6 +364,16 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
   the schema fields in `required`, so an optional new field is returned *never* - that silently made
   the first B and D runs meaningless; (b) the trace score wanders up to **5 steps on one question**,
   so C's "21 -> 27" sits inside the noise and the judge now scores the median of 3 repeats.
+- **F (14B vs 30B) is now runnable but still never run.** The plan's "just set `PVA_CODER_MODEL`"
+  could not work: `config.CODER_MODEL` is read at import and a Start-button run has no environment
+  (and no Kaggle Secrets, gotcha 8), so the 30B would have loaded while the log looked like a 14B
+  run. **Start Coder** now has a `model` dropdown (30B default); the value rides in the secrets
+  bundle and `coder_main.wanted_models()` reads it at call time, keeps the other model as the
+  fallback and ignores an unknown name. Costs a ~6.5 min start-up, and buys information not quality.
+- **G (other projects/branches) works, and fixed a real bug:** `service._resolve_source` only tried
+  the FIRST allowed folder, so a file in any other project could not be read at all (`summarize`, a
+  draft's context and D's follow-up silently refused them) even though that is the only name
+  `index.display()` ever shows. The README now has the `CODER_ALLOWED_DIRS` and `git worktree` recipe.
 
 ## Status (2026-10-09): improving the Coder, 1 of 7 experiments done
 **Next session: read [docs/CODER_HANDOVER.md](docs/CODER_HANDOVER.md) first.** It has the state, how

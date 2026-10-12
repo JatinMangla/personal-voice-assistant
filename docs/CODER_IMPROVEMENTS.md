@@ -185,18 +185,47 @@ existing ratings table and the embedding search. Switch: `CODER_NOTES=0`.
 **Expect:** no change on the benchmark (it has no history); measured instead by replaying the two
 real bad answers we already have.
 
-### F. 14B versus 30B, measured
-**Fixes:** we assumed the 30B is better and never checked.
+### F. 14B versus 30B: the plan was not actually runnable (fixed 2026-10-12)
+
+The plan said "nothing to build, just set `PVA_CODER_MODEL`". That was wrong, and it would have
+wasted a start-up to discover: `config.CODER_MODEL` reads the environment **at import time**, and a
+run started by the GitHub button has no such environment -- Kaggle gives those runs no Secrets
+either (gotcha 8), which is why everything else travels in the encrypted bundle. The variable would
+simply have been ignored and the 30B would have loaded, looking like a successful "14B run".
+
+Now: **Start Coder has a `model` dropdown** (30B default, 14B the only alternative), the value rides
+in the secrets bundle, and `coder_main.wanted_models()` reads it **at call time**, puts the other
+model second as the fallback, and **ignores an unknown name** rather than wasting a start-up pulling
+something that does not exist. Six tests cover it, including that the 30B stays the default and that
+a broken bundle cannot stop a run. Still never run: it costs a full ~6.5 min start-up plus a
+benchmark, and it buys information, not quality.
+
 **Build:** nothing: run the same benchmark with `PVA_CODER_MODEL=qwen2.5-coder:14b`.
 **Expect:** 30B better on quality, 14B ~3x faster to write and quicker to load. Knowing the gap
 decides whether a future LoRA (which would realistically have to be the 14B) is even worth it.
 
-### G. Other projects and branches indexed
-**Fixes:** the Coder only sees this repo.
-**Build:** already supported by `CODER_ALLOWED_DIRS`; add a worktree recipe and make answers name
-the project a file belongs to. **Do not add company code** unless the owner's employer allows that
-code to leave the laptop (Kaggle is Google, plus ngrok).
-**Expect:** no change on this benchmark; it widens what can be asked.
+### G. Other projects and branches: works, and it was hiding a real bug (2026-10-12)
+
+Verified with two projects that define the **same function name**, offline, no GPU: both appear in
+the results, each hit carries its project prefix (`other-project/src/budget.py`), each project is
+found on its own wording, `repo_map` narrows to one project, and a draft must name the project in
+its path (`src/new.py` with two roots is refused, as are `../escape.py` and an unknown project).
+
+**The bug this turned up:** `service._resolve_source` only ever tried `self.roots[0] / source`, so
+**a file in any folder but the first could not be read at all** -- the `<project>/rest` form that
+`index.display()` prints, and therefore the only name the model or the owner ever sees for a second
+project, always resolved to nothing. `summarize`, a draft's `context_paths` and D's follow-up
+silently refused those files. Now fixed, with a test that the prefix resolves only inside the
+project it names and cannot be used to reach another one or escape the roots.
+
+A near miss worth recording: my first hand-check printed `True` for this because it printed
+`is not None` on a boolean-ish expression, and the real failure only showed when it became a proper
+assertion. **Hand-checks print; tests assert.**
+
+Added to the README: how to set `CODER_ALLOWED_DIRS`, and a `git worktree` recipe for asking about
+two branches at once without disturbing the working folder. **Do not add company code** unless the
+owner's employer allows that code to leave the laptop (Kaggle is Google, plus ngrok); still not
+confirmed, so still not done.
 
 ### H. Two-pass answers (only if A-E leave gaps)
 Draft, then let the model criticise its own draft against the code before answering. Roughly
@@ -313,7 +342,8 @@ differences apart; `investigate` is the next thing to judge there, and it needs 
 | **AB self-test, inert** (2026-10-09) | 14/14, 14/14 | 23/30 | 6/6 | 5.5/6 | 3/3 | pass | 28 calls, 131k+5.0k tok, 211 s | **measured nothing:** `test` was an optional schema field, so no draft ever returned one |
 | **A+B, self-test working** (2026-10-09) | **14/14 named, 14/14 refs** | **24/30** (median of 3, spread 2) | 6/6 | **5.83/6** (best) | 3/3 | pass | 37 calls total, but **B itself only +2 calls** (8 vs 6 for the 6 drafts); the other 6 are the new 3x trace repeats | **BOTH KEPT, on by default** |
 | **E notes** (2026-10-12) | not on this benchmark (no history) | - | - | - | - | pass | 0 extra calls | **KEPT, on.** Measured live: stores the correction, warns a rephrasing, never warns an unrelated question; threshold 0.34 swept against the 14 questions = 4/4 right, 0 false |
-| F 14B | | | | | | | | not started |
+| **F 14B** | | | | | | | | **now runnable, never run.** The model was unreachable from the Start button (see below); `Start Coder` has a `model` dropdown and `coder_main.wanted_models()` reads it. Costs a full ~6.5 min start-up |
+| **G other projects** | | | | | | pass | 0 | **works, and a real bug was fixed:** files outside the FIRST folder could not be read at all |
 | **I investigate** (2026-10-12) | - | **19/30** vs `ask_repo` **20/30** (tied, 1-step spread) | - | - | - | pass | **6.2 calls, 90 s, 40k tok per question** vs 1 call, 29 s, 10.5k | **available, NOT default:** a tie that costs 6x the calls and 3x the time |
 | combined keepers | **14/14 named, 14/14 refs** | 24/30 (median of 3) | 6/6 | 5.83/6 | 3/3 | pass | 28 calls + 2 for B | **A + B + C + E is the default** |
 
