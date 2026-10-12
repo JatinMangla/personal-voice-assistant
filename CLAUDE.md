@@ -312,6 +312,12 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
     (1.01x). With tiny prompts it *looks* like 2.4x, because prefilling them is nearly free - always
     measure with a realistic prompt. `coder_main.py` sets `OLLAMA_NUM_PARALLEL=1` on purpose (one
     user, the whole 32k context for one request, two T4s).
+37. (2026-10-12) **A graceful fallback is a liar in a benchmark.** The first `investigate` vs
+    `ask_repo` run printed a tidy tie (11/30 each) that was pure fiction: the Coder had briefly
+    stopped answering, `client._offline_until` hid it for 30 s at a time, and both tools fell back to
+    offline search, so every pass returned *something* and got scored. The tell was `0 calls, 0s` in
+    the cost column. Any harness must **count the model calls and refuse to score a pass that made
+    none** (`coder_compare_methods.py` now exits on that, on an offline fallback and on a cache hit).
 36. (2026-10-12) **Writing the test questions down made the real search worse.** `coder_bench.py`
     holds all 14 benchmark questions as string literals, so it matched every one of them and pushed
     the real code out of the top 3 on 6 of 14 (first-place retrieval fell to 5-6/14). `search.py`
@@ -340,9 +346,16 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
 - **The default is now A + B + C.** Against the baseline: `ask_repo` names 13 -> **14/14**, refs
   12 -> **14/14**, draft style 5.33 -> **5.83/6**, drafts 6/6 and now self-repairing, safety pass.
   `ask_repo` and draft style are at this benchmark's ceiling; the cross-file trace is the open ground.
-- **Built but NOT measured: E** (`CODER_NOTES`, remembered corrections) and **`investigate`**, the
-  agentic loop: it plans a hard question into <= 5 sub-questions, searches and answers each one
-  separately, then writes one answer showing its steps. Measure both in a fresh session.
+- **Measured 2026-10-12, both now settled.** **E** (`CODER_NOTES`, remembered corrections) is
+  **kept and on**: it stores a correction, warns a rephrased question and never an unrelated one,
+  and the 0.34 threshold was swept against the benchmark's 14 questions (4/4 right, 0 false; 0.25
+  and below start warning the wrong ones). **`investigate`** (the agentic loop) is **available but
+  not the default and not recommended**: on 3 trace questions it scored **19/30 against a single
+  `ask_repo`'s 20/30** -- a tie -- while costing **6.2x the model calls, 3x the time and 4x the
+  prompt tokens**. Its first measurement was 14/30, because each sub-question read only
+  `ASK_CHUNKS` (6) pieces and three overlapping steps saw FEWER files (10) than one wide call (11);
+  giving every step `ASK_CHUNKS_WIDE` recovered 5 of the 6 steps. Use it only when you want the
+  plan and the per-step findings shown, never for speed, and never narrow the per-step reading again.
 - **"Multi subagents for faster work" was measured and answered: it cannot work here.** Three
   realistic 16k-token requests at once took 62.2 s against 62.7 s serial (**1.01x**) - one Kaggle run
   answers one request at a time (`OLLAMA_NUM_PARALLEL=1`, two T4s). The agentic planning was built

@@ -50,3 +50,11 @@ def test_the_recording_client_is_a_real_client_with_a_call_log():
     assert issubclass(compare.Recording, CoderClient)
     client = compare.Recording("https://example.invalid", "k")
     assert client.calls == []
+
+def test_a_pass_that_never_reached_the_model_is_refused_not_scored():
+    """The first real run scored 9 passes that made no model call at all (the Coder had briefly
+    gone away), and the resulting "+0 steps" tie was meaningless. Such a pass must void the run."""
+    source = (SCRIPTS / "coder_compare_methods.py").read_text(encoding="utf-8")
+    assert "did not reach the model" in source
+    assert "Closest code instead" in source and "(cached" in source
+    assert "sys.exit" in source

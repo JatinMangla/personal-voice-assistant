@@ -105,6 +105,15 @@ def main() -> None:
                 before, start = len(client.calls), time.time()
                 answer = getattr(coder, method)(question)
                 wall = time.time() - start
+                # A pass that made NO model call did not measure anything: the first run of this
+                # script scored 9 such passes as real results (the Coder had briefly gone away and
+                # `_offline_until` hid it for 30 s), and the "+0 steps" tie was meaningless. A
+                # fallback or a cache hit must stop the run, not quietly become a number.
+                made_calls = len(client.calls) - before
+                if not made_calls or "Closest code instead" in answer or "(cached" in answer:
+                    sys.exit(f"\n{method} on trace{i + 1} did not reach the model "
+                             f"({made_calls} calls). The run is void, so nothing is scored. "
+                             "Check /health and the free limits, then start again.")
                 got, missed = grade(answer, steps)
                 scores[method][i].append(len(got))
                 misses[method][i].append(missed)

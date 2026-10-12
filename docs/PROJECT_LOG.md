@@ -534,6 +534,28 @@ run on Kaggle or a device yet.
   default matches the docs, that E warns a similar question but not an unrelated one, and that the
   self-test sandbox refuses `os`/`open`/`exec` while passing and failing real asserts. 653 tests.
 
+- 2026-10-12 (the Coder started from here with `gh workflow run "Start Coder"`, ready in 376 s, GPU
+  budget 0 % used): **the two unmeasured features are now measured, and the agentic one lost.**
+  **`investigate` is a tie that costs six times as much**: 19/30 against a single `ask_repo`'s 20/30
+  (1-step spread) for **6.2 model calls, 90 s and 40k prompt tokens per question** against 1 call,
+  29 s and 10.5k. Its first measurement was 14/30 and the diagnosis matters: splitting a question
+  **narrowed** the reading, because each sub-question got `ASK_CHUNKS` (6) pieces and three
+  overlapping steps saw 10 files between them against the 11 a single wide call sees - giving every
+  step `ASK_CHUNKS_WIDE` recovered 5 of the 6 lost steps. So the premise behind "agentic" was wrong
+  here: the useful part (read more code) was already done in one call by `ASK_CHUNKS_WIDE`. It stays
+  available for when the plan and per-step findings are worth seeing, never for speed. **E is kept
+  and on**, and its threshold is now justified by a sweep rather than taste: `NOTE_MIN_OVERLAP = 0.34`
+  warns 4/4 realistic rephrasings and 0 wrong questions, while 0.25 and below start confusing
+  "spoken yes or no" with "spoken due time for a reminder"; a complete synonym rewrite will not match
+  and that is accepted. A **false positive in my own check** is recorded too: it reported "the
+  correction reached the prompt" by searching for `stop_reason`, a word the code chunks contain
+  anyway - never test for a feature with words the rest of the prompt already holds. Also found a
+  **third way to measure nothing**: the first `investigate` run printed a tidy 11/30 tie that was
+  entirely fake, because the Coder briefly stopped answering, the client's 30 s offline memory hid
+  it, and both tools fell back to offline search, so every pass still returned something and got
+  scored (the tell was `0 calls, 0s`); `coder_compare_methods.py` now refuses to score a pass that
+  made no model call. 655 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

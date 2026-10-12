@@ -104,7 +104,21 @@ including why the first B and D runs measured nothing, are in CODER_IMPROVEMENTS
   warns a *similar* question while leaving an unrelated one alone, and the self-test sandbox refuses
   `os`/`open`/`exec` while passing and failing real asserts correctly.
 
-### 1. Measure `investigate`, the agentic loop (built, never measured)
+### DONE 2026-10-12: `investigate` and E are both measured, so steps 1 and 2 are closed
+- **`investigate`: a tie that costs 6x.** 19/30 against a single `ask_repo`'s 20/30 (1-step spread),
+  for **6.2 calls, 90 s and 40k prompt tokens per question** against 1 call, 29 s, 10.5k. Available,
+  not the default, not recommended except when you want the plan and per-step findings shown. Its
+  first run scored 14/30 purely because each step read `ASK_CHUNKS` (6) pieces and three overlapping
+  steps saw fewer files than one wide call; every step now gets `ASK_CHUNKS_WIDE`. **Do not narrow
+  the per-step reading again.**
+- **E: kept and on.** Live check passed (stores the correction, warns a rephrasing, leaves an
+  unrelated question alone) and `NOTE_MIN_OVERLAP = 0.34` was swept against the benchmark's own 14
+  questions: 4/4 realistic rephrasings warned, 0 false warnings; 0.25 and below start confusing
+  "spoken yes or no" with "spoken due time". A full synonym rewrite will not match, and that is
+  accepted -- a missed warning is free, a false one teaches the model something untrue.
+- Remaining from the original plan: **F** (14B versus 30B) and **G** (other projects/branches) only.
+
+### 1. (closed) Measure `investigate`, the agentic loop
 It plans a hard question into <= 5 sub-questions, searches and answers each separately, then writes
 one answer showing its steps (`coder.investigate`, MCP tool `investigate`, 12 tests). The benchmark
 does not call it, so use the script written for exactly this:

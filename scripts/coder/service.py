@@ -217,7 +217,11 @@ class Coder:
             steps = tasks.plan(self.client, question, repo_map=repo_map, max_steps=max_steps)
             findings: list[tuple[str, str]] = []
             for step in steps:
-                hits = self._deep_search(step, ASK_CHUNKS)
+                # Measured 2026-10-12: with ASK_CHUNKS (6) per step, three overlapping
+                # sub-questions saw only 10 files between them, FEWER than the 11 a single wide
+                # ask_repo sees with ASK_CHUNKS_WIDE. Splitting the question must not narrow the
+                # reading, so every step gets the wide budget.
+                hits = self._deep_search(step, ASK_CHUNKS_WIDE)
                 if not hits:
                     findings.append((step, "no matching code was found for this step"))
                     lines.append(f"- {step}\n  nothing found")

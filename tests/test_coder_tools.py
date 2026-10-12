@@ -1184,3 +1184,21 @@ def test_the_test_field_is_only_demanded_when_the_self_test_is_on(repo, tmp_path
     # the fake records messages, not schemas, so check the prompt that goes with each schema
     assert "Also return `test`" in fake.chats[0][1]["content"]
     assert "Also return `test`" not in fake2.chats[0][1]["content"]
+
+def test_the_note_threshold_catches_rephrasings_without_false_warnings(tmp_path):
+    """Swept against the benchmark's own questions on 2026-10-12: 0.34 warns 4/4 realistic
+    rephrasings and 0 wrong questions, while 0.25 and below start confusing "spoken yes or no"
+    with "spoken due time for a reminder". Do not lower it without re-running that sweep."""
+    from coder.cache import Cache
+    cache = Cache(tmp_path / "notes.db")
+    stored = "How does Jarvis decide a session has been idle too long?"
+    aid = cache.put("ask_repo", stored, "a wrong answer", [])
+    cache.rate(aid, "bad")
+    cache.add_note(aid, "it is idle_reached in src/timer.py")
+
+    assert cache.notes_for("ask_repo", "How does Jarvis work out the session has been idle too long?")
+    assert cache.notes_for("ask_repo", "When does Jarvis decide a session is idle?")
+    for unrelated in ("Which function strips emoji from the model's replies?",
+                      "Where is a spoken due time for a reminder turned into a date?",
+                      "Which code stores paired phones and hashes their tokens?"):
+        assert not cache.notes_for("ask_repo", unrelated), unrelated

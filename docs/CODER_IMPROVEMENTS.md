@@ -147,7 +147,37 @@ round, so cost cannot run away. Switch: `CODER_FOLLOWUP=0`.
 **Expect:** trace 8/10 -> 10/10; about 1.5-2x the time on the questions that use it, unchanged on
 the rest.
 
-### E. Remember corrections (learning without training)
+### E. Remember corrections: MEASURED on the live Coder (2026-10-12)
+
+Works, and the threshold is now justified by evidence rather than taste.
+
+- End to end against the real model: asked a question, rated the answer **bad** with the true
+  correction, asked again -> the note is stored, an unrelated question is **not** warned, and the
+  re-answer still names the right function. Three ordinary answers, 5-9 s each.
+- **A false positive in my own check, worth recording:** the first run printed "the correction
+  reached the prompt: True" while "the warning reached the prompt: False". Only the second was
+  honest -- my check searched the prompt for `stop_reason`/`coder_main`, which appear in the code
+  chunks anyway. The note had in fact **not** matched, because the rephrasing I used
+  ("works out ... shut down after being unused") shares only the word "coder" with the original.
+  Lesson: never test for a feature with words the rest of the prompt already contains.
+- **The threshold was then swept against the benchmark's own 14 questions** (a note stored for one
+  must warn that one and nothing else):
+
+| `NOTE_MIN_OVERLAP` | realistic rephrasings warned | wrong questions warned |
+|---|---|---|
+| 0.15 | 4/4 | **5** |
+| 0.25 | 4/4 | 1 |
+| **0.34 (current)** | **4/4** | **0** |
+| 0.5 | 4/4 | 0 |
+
+So 0.34 is right: it catches every natural rephrasing ("How does the Coder stop when idle?",
+"Where is the Coder idle stop?") with no false warnings, and lowering it would start warning on
+pairs like "spoken yes or no" versus "spoken due time for a reminder". **A complete synonym rewrite
+with no shared words will not match, and that is accepted** -- a missed warning costs nothing, a
+false one teaches the model something untrue. Do not lower it to chase full rewrites; that needs
+the embedding search, which would cost a model call on every question.
+
+### E. Original plan: remember corrections (learning without training)
 **Fixes:** nothing yet, but a rated-bad answer currently teaches the system nothing.
 **Build:** when an answer is rated bad, store the question and (optionally) my correction. A later
 similar question shows that note in the prompt: "you got this wrong before: ...". Reuses the
@@ -171,6 +201,21 @@ code to leave the laptop (Kaggle is Google, plus ngrok).
 ### H. Two-pass answers (only if A-E leave gaps)
 Draft, then let the model criticise its own draft against the code before answering. Roughly
 doubles time and cost, so it would be switched on per question, not by default.
+
+## A third way to measure nothing: a pass that never reached the model
+
+**2026-10-12.** The first `investigate`-versus-`ask_repo` run printed a clean-looking tie
+(`11/30` each, "+0 steps") and it was **entirely false**. The tell was in the cost column:
+`0 calls, 0s` for 15 of the 18 passes. The Coder had briefly stopped answering, `client._offline_until`
+hid that for 30 s at a time, and `ask_repo`/`investigate` did what they are designed to do -- fall
+back to offline search -- so every pass still returned *something* and my script scored it.
+Re-running the identical loop afterwards worked perfectly (6 passes, 1 call for `ask_repo`, 6-7 for
+`investigate`), which proves the script was right and the run was simply void.
+
+`coder_compare_methods.py` now **exits** if any pass makes no model call, or returns an offline
+fallback or a cache hit, rather than turning it into a number. Lesson for every future harness:
+**count the model calls and refuse to score a pass that made none.** A graceful fallback is a
+feature in the tool and a liar in a benchmark.
 
 ## The trap that made two experiments look dead: Ollama only fills `required` fields
 
@@ -267,10 +312,10 @@ differences apart; `investigate` is the next thing to judge there, and it needs 
 | **A style + refs** (2026-10-09) | **14/14 named, 14/14 refs** (reproduced) | 23/30 (noise) | 6/6 | **5.67/6** | 3/3 | pass | 28 calls, 129k+5.1k tok, **216 s** | **KEPT, on by default** |
 | **AB self-test, inert** (2026-10-09) | 14/14, 14/14 | 23/30 | 6/6 | 5.5/6 | 3/3 | pass | 28 calls, 131k+5.0k tok, 211 s | **measured nothing:** `test` was an optional schema field, so no draft ever returned one |
 | **A+B, self-test working** (2026-10-09) | **14/14 named, 14/14 refs** | **24/30** (median of 3, spread 2) | 6/6 | **5.83/6** (best) | 3/3 | pass | 37 calls total, but **B itself only +2 calls** (8 vs 6 for the 6 drafts); the other 6 are the new 3x trace repeats | **BOTH KEPT, on by default** |
-| E notes | | | | | | | | built + tested, **not measured** (the benchmark has no history; measure by hand) |
+| **E notes** (2026-10-12) | not on this benchmark (no history) | - | - | - | - | pass | 0 extra calls | **KEPT, on.** Measured live: stores the correction, warns a rephrasing, never warns an unrelated question; threshold 0.34 swept against the 14 questions = 4/4 right, 0 false |
 | F 14B | | | | | | | | not started |
-| I investigate (agentic loop) | | | | | | | | built + 12 tests, **not measured**; compare it to `ask_repo` on repeated trace questions |
-| combined keepers | | | | | | | | A+B is the current default; E and `investigate` still to judge |
+| **I investigate** (2026-10-12) | - | **19/30** vs `ask_repo` **20/30** (tied, 1-step spread) | - | - | - | pass | **6.2 calls, 90 s, 40k tok per question** vs 1 call, 29 s, 10.5k | **available, NOT default:** a tie that costs 6x the calls and 3x the time |
+| combined keepers | **14/14 named, 14/14 refs** | 24/30 (median of 3) | 6/6 | 5.83/6 | 3/3 | pass | 28 calls + 2 for B | **A + B + C + E is the default** |
 
 ## What the baseline run already told us (2026-10-09)
 
@@ -292,7 +337,55 @@ Run with the 6-spec draft suite and 3 traces, not the smaller first benchmark:
 
 Order to run next, by expected gain: **C (repo map) -> D (follow-up) -> A (style + refs) -> B (self-tests)**.
 
-## I. The agentic loop (`investigate`), and why it is NOT parallel
+## I. The agentic loop (`investigate`): MEASURED, and it LOSES
+
+**Result (2026-10-12, 3 repeats of all 3 trace questions with each method, medians compared, every
+pass verified to have reached the model):**
+
+| | `ask_repo` | `investigate` |
+|---|---|---|
+| trace medians | **20/30** (6, 6, 8) | **14/30** (4, 5, 5) |
+| model calls per question | 1.0 | **6.6** |
+| seconds per question | 32 | **66** |
+| prompt tokens per question | 10.7k | **30.6k** |
+
+A **6-step loss**, wider than the 3-step spread within one question, while costing 6.6x the calls,
+2x the time and 3x the tokens. The agentic loop is worse *and* far more expensive, so it is not the
+default and must not become one on the strength of the idea alone.
+
+**Why, diagnosed rather than guessed.** The premise was that splitting a question widens what gets
+read. It does the opposite:
+- a single `ask_repo` on a wide question already asks for `ASK_CHUNKS_WIDE` = **14 pieces from 11
+  files**;
+- `investigate` planned only **3** sub-questions, each getting `ASK_CHUNKS` = 6, and because the
+  sub-questions overlap heavily, all three together saw **10 files** -- *fewer* than the single call,
+  and missing `src/config.py`, `src/budget.py`, `scripts/coder_mcp.py` among others.
+
+So the split narrowed the reading and then paid six times over for it. `ASK_CHUNKS_WIDE` (the fix
+from an earlier session for exactly this failure) already does the useful part of "agentic" in one
+call.
+
+**After the fix (every step gets `ASK_CHUNKS_WIDE` instead of `ASK_CHUNKS`), 2 repeats:**
+
+| | `ask_repo` | `investigate` (narrow steps) | `investigate` (wide steps) |
+|---|---|---|---|
+| trace medians | **20/30** | 14/30 | **19/30** |
+| calls per question | 1.0 | 6.6 | 6.2 |
+| seconds per question | 29 | 66 | **90** |
+| prompt tokens per question | 10.5k | 30.6k | **40.5k** |
+
+The diagnosis was right: widening each step recovered **5 of the 6 lost steps** (14 -> 19/30), and
+`investigate` is now *statistically tied* with a single `ask_repo` call (-1 step, with a 1-step
+spread). It is also noticeably steadier -- medians 6/6/6 against 5/6/8, and on trace 1 it beat
+`ask_repo` in both passes (6,6 vs 6,5).
+
+**Verdict: `investigate` stays available but is NOT the default and is not recommended.** A tie
+bought with **6.2x the model calls, 3x the wall time and 4x the prompt tokens** is a loss on a free
+GPU budget: the same minutes buy six ordinary questions. Use it only when the *shape* of the answer
+matters -- it shows its plan and what each step found, so the work is checkable -- and never for
+speed. Do not "improve" it by narrowing the per-step reading again; that is what made it lose.
+
+## Why it is NOT parallel
 
 The owner asked for "multi subagents, working like agentic AI, for faster work". Half of that is
 built, and the other half is measured away:
