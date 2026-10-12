@@ -574,6 +574,28 @@ run on Kaggle or a device yet.
   ignores an unknown name rather than wasting a start-up. F itself is still unrun (one start-up plus
   one benchmark); the README gained the `CODER_ALLOWED_DIRS` and `git worktree` recipe. 670 tests.
 
+- 2026-10-12 (last): **one command to connect any computer** (`scripts/setup_coder_client.py`):
+  venv, the three packages, `.mcp.json` with the right interpreter path **for that operating
+  system** (the committed copy is Windows-only, which is the one line that breaks a Mac or Linux
+  setup), `CODER_KEY` stored so it survives a reboot, the index built, and a link check that prints
+  the key fingerprint. Idempotent, keeps any other MCP server in the file, and refuses a key
+  `make_key.py` could never have printed. [docs/CODER_SETUP.md](CODER_SETUP.md) is the one page.
+  Then **20 more languages indexed (53 file types, was 33), 13 with real structural chunking
+  (was 4)**: Go, Rust, C#, Ruby, PHP, SQL, Swift, Scala, Dart, Lua, Elixir, Perl, R. C/C++ and Dart
+  methods are indexed but left on the window fallback deliberately - a regex would name the wrong
+  function often enough to be worse than no name. This was built by a **cloud agent** on a branch
+  and **verified here before merging** rather than trusted: 755 tests pass, the
+  `"\n".join(lines[start-1:end]) == text` invariant holds for all 13 new languages on my own
+  fixtures, `TEXT_EXTENSIONS ∩ SECRET_SUFFIXES` is empty, and `server.key`, `cert.pem`,
+  `api_key.sql`, `secrets.go`, `credentials.cs`, `private_key.rs` and `keystore.jks` are all still
+  refused. (I also checked "token" in a filename: indexed on both branches, which is right -
+  refusing it would blind the Coder to `src/devices.py`, the token code the owner asks about most.)
+  The agent corrected one of its own claims unprompted, that a line-length cap prevented a
+  regex hang: it measured linear scaling and no catastrophic backtracking, so the cap only stops a
+  chunk being named after 12k characters of noise. **Open follow-up:** `search.TEST_PATH` knows only
+  Python/Kotlin test conventions, so Go's `*_test.go`, `*Test.cs`, `*_spec.rb` and PHPUnit
+  `*Test.php` escape the 0.35 test penalty and would outrank real code on another project. 755 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

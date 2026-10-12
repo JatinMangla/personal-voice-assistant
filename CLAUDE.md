@@ -370,6 +370,15 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
   run. **Start Coder** now has a `model` dropdown (30B default); the value rides in the secrets
   bundle and `coder_main.wanted_models()` reads it at call time, keeps the other model as the
   fallback and ignores an unknown name. Costs a ~6.5 min start-up, and buys information not quality.
+- **Languages: 53 file types indexed (was 33), 13 with real structural chunking (was 4).** Go,
+  Rust, C#, Ruby, PHP, SQL, Swift, Scala, Dart, Lua, Elixir, Perl and R now give search a real
+  function/class name; C/C++ and Dart methods are indexed but stay on the **window fallback on
+  purpose** (a regex would name the wrong function often enough to be worse than no name). Built by
+  a cloud agent on a branch, then verified here before merging: 755 tests, the line-number
+  invariant holds for every new language, and `TEXT_EXTENSIONS` cannot overlap `SECRET_SUFFIXES`.
+  **Known follow-up:** `search.TEST_PATH` only knows Python/Kotlin test conventions, so Go's
+  `*_test.go`, `*Test.cs`, `*_spec.rb` and PHPUnit `*Test.php` do NOT get the 0.35 test penalty --
+  on another project tests would outrank code again. Needs a real multi-language index to measure.
 - **G (other projects/branches) works, and fixed a real bug:** `service._resolve_source` only tried
   the FIRST allowed folder, so a file in any other project could not be read at all (`summarize`, a
   draft's context and D's follow-up silently refused them) even though that is the only name

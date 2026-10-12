@@ -132,6 +132,15 @@ including why the first B and D runs measured nothing, are in CODER_IMPROVEMENTS
   is to know what a future LoRA on the 14B would cost in answer quality.
 - Nothing else is outstanding from the original plan.
 
+### The one real follow-up left (found 2026-10-12, not yet done)
+**`search.TEST_PATH` only knows Python and Kotlin test conventions.** Now that 53 file types are
+indexed, Go's `foo_test.go`, `*Test.cs`, Ruby's `*_spec.rb` and PHPUnit's `*Test.php` do **not** get
+the 0.35 test penalty, so on another project tests would outrank the code they test -- the exact
+ranking failure that the penalty exists to prevent (see "The judge was poisoning the real search").
+Widening the regex is two lines; the reason it was left is honest: judging it needs a **real
+multi-language index** to measure against, and none existed. If the owner points the Coder at a Go
+or C# project, do that first, measure retrieval before and after, and only then tune.
+
 ### 1. (closed) Measure `investigate`, the agentic loop
 It plans a hard question into <= 5 sub-questions, searches and answers each separately, then writes
 one answer showing its steps (`coder.investigate`, MCP tool `investigate`, 12 tests). The benchmark
