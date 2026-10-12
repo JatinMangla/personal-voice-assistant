@@ -102,6 +102,364 @@ def test_split_identifiers():
     assert chunk.split_identifiers("startBlocker start_blocker plain") == "start blocker start blocker"
 
 
+# --- chunking: the other languages -------------------------------------------------------
+# Each sample is real-shaped on purpose (receivers, generics, modifiers), because those are
+# what a naive regex gets wrong. The expected set is (kind, name, start line).
+LANGS = {
+    "svc/server.go": ('''package main
+
+type Store interface {
+\tGet(key string) (string, error)
+}
+
+type Server struct {
+\taddr string
+}
+
+func NewServer(addr string) *Server {
+\treturn &Server{addr: addr}
+}
+
+func (s *Server) Handle(key string) error {
+\treturn nil
+}
+''', {("interface", "Store", 3), ("struct", "Server", 7),
+      ("function", "NewServer", 11), ("function", "Handle", 15)}),
+
+    "svc/budget.rs": ('''use std::time::Duration;
+
+pub struct Meter {
+    used: u64,
+}
+
+pub trait Clock {
+    fn now(&self) -> Duration;
+}
+
+impl<T: Clock> Meter<T> {
+    pub async fn add(&mut self, secs: u64) -> u64 {
+        secs
+    }
+}
+
+pub(crate) fn stop_reason() -> Option<&'static str> {
+    None
+}
+''', {("struct", "Meter", 3), ("trait", "Clock", 7), ("function", "now", 8),
+      ("impl", "Meter", 11), ("function", "add", 12), ("function", "stop_reason", 17)}),
+
+    "svc/Budget.cs": ('''namespace Jarvis.Budget
+{
+    public interface IMeter
+    {
+        int Used { get; }
+    }
+
+    public class GpuMeter : IMeter
+    {
+        private readonly int _limit;
+
+        public GpuMeter(int limit)
+        {
+            _limit = limit;
+        }
+
+        public async Task<bool> ShouldStopAsync(int minutes)
+        {
+            return minutes >= _limit;
+        }
+
+        public Dictionary<string, List<int>> Group(string key)
+        {
+            return null;
+        }
+    }
+
+    public enum Severity { Warn, Stop }
+}
+''', {("namespace", "Jarvis", 1), ("interface", "IMeter", 3), ("class", "GpuMeter", 8),
+      ("function", "GpuMeter", 12), ("function", "ShouldStopAsync", 17),
+      ("function", "Group", 22), ("enum", "Severity", 28)}),
+
+    "svc/reminders.rb": ('''require "json"
+
+module Jarvis
+  class Reminders < Base
+    def initialize(store)
+      @store = store
+    end
+
+    def due?(now)
+      false
+    end
+  end
+
+  def self.load_all(path)
+    {}
+  end
+end
+''', {("module", "Jarvis", 3), ("class", "Reminders", 4), ("function", "initialize", 5),
+      ("function", "due?", 9), ("function", "self.load_all", 14)}),
+
+    "web/Devices.php": ('''<?php
+
+interface TokenStore
+{
+    public function find(string $hash): ?array;
+}
+
+abstract class Devices implements TokenStore
+{
+    public function find(string $hash): ?array
+    {
+        return null;
+    }
+
+    private static function expired(int $made): bool
+    {
+        return false;
+    }
+}
+
+function pair_code(): string
+{
+    return "";
+}
+''', {("interface", "TokenStore", 3), ("function", "find", 5), ("class", "Devices", 8),
+      ("function", "find", 10), ("function", "expired", 15),
+      ("function", "pair_code", 21)}),
+
+    "db/schema.sql": ('''-- the coder index
+CREATE TABLE IF NOT EXISTS files (
+    path TEXT PRIMARY KEY
+);
+
+create unique index files_by_path on files(path);
+
+CREATE MATERIALIZED VIEW recent AS SELECT path FROM files;
+
+CREATE OR REPLACE FUNCTION bump_version() RETURNS trigger AS $$
+BEGIN
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+ALTER TABLE files ADD COLUMN lines INTEGER;
+''', {("table", "files", 2), ("index", "files_by_path", 6), ("view", "recent", 8),
+      ("function", "bump_version", 10), ("table", "files", 16)}),
+
+    "ios/Recorder.swift": ('''import AVFoundation
+
+protocol LevelSink {
+    func level(_ peak: Float)
+}
+
+final class Recorder: LevelSink {
+    func level(_ peak: Float) {}
+
+    public func isSilent(threshold: Float) -> Bool {
+        return true
+    }
+}
+
+extension Recorder {
+    static func make() -> Recorder { Recorder() }
+}
+
+struct Settings {
+    var quiet: Bool
+}
+''', {("protocol", "LevelSink", 3), ("function", "level", 4), ("class", "Recorder", 7),
+      ("function", "level", 8), ("function", "isSilent", 10),
+      ("extension", "Recorder", 15), ("function", "make", 16), ("struct", "Settings", 19)}),
+
+    "jvm/Search.scala": ('''package jarvis
+
+object Search {
+  def rrf(ranks: Seq[Int]): Double = 0.0
+}
+
+trait Ranker {
+  def score(q: String): Double
+}
+
+case class Hit(path: String)
+
+class KeywordRanker extends Ranker {
+  override def score(q: String): Double = 0.0
+}
+''', {("object", "Search", 3), ("function", "rrf", 4), ("trait", "Ranker", 7),
+      ("function", "score", 8), ("class", "Hit", 11), ("class", "KeywordRanker", 13),
+      ("function", "score", 14)}),
+
+    "plugin/levels.lua": ('''local M = {}
+
+function M.peak(samples)
+  return 0
+end
+
+local function silent(samples)
+  return true
+end
+''', {("function", "M.peak", 3), ("function", "silent", 7)}),
+
+    "app/player.dart": ('''import 'dart:async';
+
+mixin Logging {
+  void log(String line) {}
+}
+
+abstract class Sink {
+  void play(List<int> bytes);
+}
+
+class SpeechPlayer extends Sink with Logging {
+  final List<List<int>> queue = [];
+}
+
+enum PlayState { idle, playing }
+''', {("mixin", "Logging", 3), ("class", "Sink", 7), ("class", "SpeechPlayer", 11),
+      ("enum", "PlayState", 15)}),
+
+    "ex/budget.ex": ('''defmodule Jarvis.Budget do
+  @limit 30
+
+  defstruct used: 0, limit: @limit
+
+  def new(limit) do
+    %__MODULE__{limit: limit}
+  end
+
+  defp over?(budget) do
+    budget.used >= budget.limit
+  end
+
+  defmacro warn_at(ratio) do
+    quote do: unquote(ratio)
+  end
+end
+''', {("module", "Jarvis.Budget", 1), ("function", "new", 6), ("function", "over?", 10),
+      ("function", "warn_at", 14)}),
+
+    "tools/report.pl": ('''use strict;
+
+package Report;
+
+sub summarise {
+    my ($lines) = @_;
+    return scalar @$lines;
+}
+''', {("module", "Report", 3), ("function", "summarise", 5)}),
+
+    "stats/fit.R": ('''limit <- 30
+
+fit_model <- function(df) {
+  lm(y ~ x, data = df)
+}
+''', {("function", "fit_model", 3)}),
+}
+
+
+@pytest.mark.parametrize("path", sorted(LANGS))
+def test_other_languages_find_their_definitions(path):
+    text, expected = LANGS[path]
+    got = {(c.kind, c.name, c.start) for c in chunk.chunk_file(path, text)}
+    assert expected <= got, f"missing {expected - got}"
+
+
+@pytest.mark.parametrize("path", sorted(LANGS))
+def test_other_languages_chunk_line_numbers_match_the_source(path):
+    """The same invariant the Python chunks keep: a chunk's text is exactly its own lines."""
+    text, _ = LANGS[path]
+    lines = text.splitlines()
+    for c in chunk.chunk_file(path, text):
+        assert "\n".join(lines[c.start - 1:c.end]) == c.text
+
+
+@pytest.mark.parametrize("path", sorted(LANGS))
+def test_other_languages_invent_no_definitions(path):
+    """Nothing is named that is not in the expected set: a false definition is worse than a
+    window, because search would show the wrong function name for a hit."""
+    text, expected = LANGS[path]
+    named = {(c.kind, c.name, c.start) for c in chunk.chunk_file(path, text) if c.name}
+    assert named == expected, f"unexpected {named - expected}"
+
+
+# "return Compute(x);" and "while (Ready())" look exactly like a C# method head without the
+# modifier rule, so every call inside a method would have started a new chunk.
+@pytest.mark.parametrize("line", ["        return Compute(x);",
+                                  "        if (Used >= _limit) return true;",
+                                  "    foreach (var m in meters)",
+                                  "    while (Ready())",
+                                  "    using (var f = File.Open(path))",
+                                  "        _ = Task.Run(() => Work());",
+                                  "    public int Used { get; private set; }",
+                                  "        private readonly int _limit;"])
+def test_csharp_statements_are_not_taken_for_definitions(line):
+    assert list(chunk._cs_starts([line])) == []
+
+
+def test_elixir_defstruct_is_not_a_definition():
+    """defstruct has no name of its own, so matching it would name the first field instead."""
+    got = {c.name for c in chunk.chunk_file("b.ex", "defstruct used: 0, limit: 30\n")}
+    assert "used" not in got
+
+
+def test_sql_comments_and_inserts_are_not_definitions():
+    text = "-- CREATE TABLE commented (x TEXT);\nINSERT INTO files VALUES (1);\n"
+    assert [c.name for c in chunk.chunk_file("s.sql", text) if c.name] == []
+
+
+def test_sql_quoted_name_keeps_the_whole_name():
+    got = {c.name for c in chunk.chunk_file("s.sql", 'CREATE TABLE "my table" (x TEXT);\n')}
+    assert "my table" in got
+
+
+def test_c_and_cpp_are_indexed_but_left_on_window_chunking():
+    """C/C++ declarations span lines and hide behind macros, so there is no regex for them on
+    purpose: being indexed as windows still beats being invisible to search."""
+    for suffix in (".c", ".h", ".cpp", ".hpp"):
+        assert suffix in chunk.TEXT_EXTENSIONS
+        assert suffix not in chunk.BY_REGEX
+    src = "int is_silent(const float *buf, int n) {\n    return 0;\n}\n"
+    pieces = chunk.chunk_file("dsp.c", src)
+    assert pieces and all(c.kind == "block" and c.name == "" for c in pieces)
+
+
+@pytest.mark.parametrize("path,text", [
+    ("empty.go", "\n\n\n"),
+    ("data.rs", "// just a comment\n"),
+    ("notes.sql", "SELECT 1;\n"),
+    ("blob.cs", "}\n}\n"),
+    ("x.rb", "puts 1\n"),
+])
+def test_a_file_with_no_definitions_falls_back_to_windows(path, text):
+    pieces = chunk.chunk_file(path, text)
+    assert all(c.kind == "block" for c in pieces)       # never crashes, never invents a name
+    lines = text.splitlines()
+    for c in pieces:
+        assert "\n".join(lines[c.start - 1:c.end]) == c.text
+
+
+@pytest.mark.parametrize("suffix", [".js", ".cs", ".rs", ".sql", ".go", ".kt"])
+def test_one_enormous_line_is_skipped_instead_of_backtracked(suffix):
+    """A minified bundle puts megabytes on one line. Measured: these regexes do NOT blow up on
+    it (their cost is linear), so this pins the cheaper promise -- such a line yields one
+    unnamed window instead of a bogus definition named after 12,000 characters of noise."""
+    huge = "    public static " + "a" * (chunk.MAX_LINE * 3) + "("
+    pieces = chunk.chunk_file("big" + suffix, huge + "\n")
+    assert len(pieces) == 1 and pieces[0].name == ""
+
+
+def test_many_long_lines_just_under_the_cap_still_finish():
+    """The cap cannot help here, so this is what really pins the no-backtracking property:
+    200 lines of modifier soup, each just under the cap, measured at 0.16 s."""
+    line = "    public static readonly async partial " * 95 + "int X("
+    assert len(line) < chunk.MAX_LINE
+    pieces = chunk.chunk_file("soup.cs", (line + "\n") * 200)
+    assert pieces
+
+
 # --- safety ------------------------------------------------------------------------------
 @pytest.mark.parametrize("name", [".env", ".env.local", "memory.enc", "release.jks", "kaggle.json",
                                   "secrets.py", "my_password.txt", "id_rsa", "local.properties"])
@@ -111,6 +469,20 @@ def test_secret_files_are_recognised(name):
 
 def test_secret_folder_is_recognised():
     assert safety.is_secret(Path("C:/Users/me/jarvis-keys/key.txt"))
+
+
+def test_no_indexable_extension_is_also_a_secret_extension():
+    """The guard that widening TEXT_EXTENSIONS must never trip: if ever a suffix lands in both
+    sets, is_secret still wins in index._walk, but the overlap means somebody intended to read
+    key material as source and should say so out loud."""
+    assert not (chunk.TEXT_EXTENSIONS & safety.SECRET_SUFFIXES)
+
+
+@pytest.mark.parametrize("name", ["server.key", "cert.pem", "api_key.sql", "secrets.go",
+                                  "db_password.rb", "credentials.cs", "apikey.php",
+                                  "passwd.pl", "my.private_key.rs"])
+def test_secrets_stay_refused_now_that_more_extensions_are_indexed(name):
+    assert safety.is_secret(Path("repo") / name)
 
 
 def test_resolve_allowed_stays_inside_the_roots(repo, tmp_path):
