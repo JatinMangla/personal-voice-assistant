@@ -242,6 +242,16 @@ Why it is not "many helpers at once": I measured it (2026-10-09). Three real que
 
 **Models:** `qwen3-coder:30b` (19 GB; a "mixture of experts": 30B knowledge but only 3B active per word, so it is fast; split over both T4 GPUs). If it can't start, the run uses `qwen2.5-coder:14b` (9 GB) by itself. Small helper models: `qwen3-embedding:0.6b` (meaning search) and Qwen3-Reranker-0.6B (picks the best code pieces). The log prints the real speed of the run (`[coder] speed: reading ... writing ...`): please paste it so we can compare the two models.
 
+### Setting it up on any computer: one command
+
+```
+python scripts/setup_coder_client.py
+```
+
+This is all that is needed on a new machine (including a Mac or a Linux box): it makes the `.venv`, installs the three packages, writes `.mcp.json` with the right python path for that operating system, saves your `CODER_KEY` so it survives a reboot, builds the local index, and checks the link. Safe to run twice. Full page: [docs/CODER_SETUP.md](docs/CODER_SETUP.md).
+
+The steps below are the **first-ever** setup (making the key, the GitHub secret, Kaggle). Once those exist, the one command above is the whole job on every other computer.
+
 ### One-time setup (about 15 minutes)
 
 1. **Make a key** (on this laptop, in this folder): `.venv\Scripts\python scripts\make_key.py`. Copy the printed text. This is your `CODER_KEY`; save it in your password manager too. It is the only thing that lets anyone use the Coder.
