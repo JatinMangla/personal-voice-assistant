@@ -9,3 +9,6 @@ kaggle.json
 *.jks
 *.p12
 *.keystore
+
+# Temporary git worktrees made by Claude Code agents (never part of the project)
+.claude/worktrees/
