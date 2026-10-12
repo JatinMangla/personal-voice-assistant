@@ -298,3 +298,41 @@ def test_an_answer_rated_bad_is_never_served_from_the_cache(tmp_path):
     assert c.get("ask_repo", "q") == {"id": second, "answer": "right answer"}
     c.rate(second, "good")
     assert c.get("ask_repo", "q")["id"] == second    # a good answer still comes back
+
+
+# --- the measurement harness must never outrank the code it measures -----------------------------
+def test_the_benchmark_file_does_not_outrank_the_code_it_asks_about(repo, tmp_path):
+    """Measured 2026-10-12: coder_bench.py holds all 14 benchmark questions as string literals, so
+    it matched every one and pushed the real code down on 4 of them. It is a judge, not an answer."""
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "coder_bench.py").write_text(
+        'RETRIEVAL = [\n'
+        '    ("Which meter stops the start?", "src/budget.py", "start_blocker"),\n'
+        ']\n', encoding="utf-8")
+    coder = service.Coder(tmp_path / "home", [repo])
+    coder.index.refresh()
+    hits = search.search(coder.index, "which meter stops the start", 5)
+    paths = [h["path"] for h in hits]
+    assert paths, "nothing found at all"
+    assert "src/budget.py" in paths[0], f"the judge file won: {paths}"
+
+
+def test_a_question_about_the_benchmark_itself_still_finds_it(repo, tmp_path):
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "coder_bench.py").write_text(
+        "def summary_line(run):\n"
+        '    """One line per saved benchmark variant."""\n'
+        "    return run\n", encoding="utf-8")
+    coder = service.Coder(tmp_path / "home", [repo])
+    coder.index.refresh()
+    hits = search.search(coder.index, "which function prints the benchmark summary line", 5)
+    assert any("coder_bench.py" in h["path"] for h in hits), "asking about the judge must find it"
+
+
+def test_the_judge_penalty_is_the_harshest_one():
+    """Below tests and prose: a file whose job is to quote questions is never the answer."""
+    assert search.JUDGE_PENALTY < search.TEST_PENALTY < search.PROSE_PENALTY < 1.0
+    for name in ("scripts/coder_bench.py", "coder_bench.py", "scripts/coder_compare_methods.py"):
+        assert search.JUDGE_PATH.search(name), name
+    for name in ("src/coder_main.py", "scripts/coder/search.py", "benchmarks/mine.py"):
+        assert not search.JUDGE_PATH.search(name), name

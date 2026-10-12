@@ -322,6 +322,31 @@ cross-file questions, never the default; `ask_repo` stays the everyday one.
 It would become faster for free if the Coder ever moves to the 14B (experiment F) or is given more
 parallelism, because the steps are independent by construction. Until then, sequential.
 
+## The judge was poisoning the real search (found and fixed 2026-10-12)
+
+Measured offline against the real index, with no GPU: **`scripts/coder_bench.py` holds all 14
+benchmark questions as string literals**, so it matched every single one of them and displaced the
+real code. It intruded into the top 3 of **6 of the 14 questions**, and "ranks the right file first"
+had fallen to **5-6/14**. This hurt the tool you actually use every day, not just the benchmark --
+and it was self-inflicted, by writing the questions down.
+
+Fix: `search.py` now has `JUDGE_PENALTY = 0.2` for `coder_bench.py` and `coder_compare_methods.py`
+(harsher than tests at 0.35 and prose at 0.6, since a file whose job is to *quote* questions is
+never the answer), lifted when the question is itself about benchmarking (`JUDGE_WORDS`). Result:
+**first-place 6/14 -> 7/14, and the judge now intrudes on zero questions**; `src/devices.py` went
+2 -> 1 and `src/intents.py` 3 -> 2. Three tests pin it, including that asking *about* the benchmark
+still finds it.
+
+**What is left is not a keyword problem, so it was not hacked further.** The two remaining misses
+(`coder_main.stop_reason`, `llm.SentenceChunker`) fail because the question's words are simply not
+in the code: "where does the Coder decide to stop because nobody used it" shares only 2 of its 6
+terms with `stop_reason`, while Kotlin functions *named* `stop` win the name bonus. That is what
+meaning-search is for, and the real index already has **100 % vector coverage** (2027/2027 chunks,
+142 file summaries) -- both "missing" chunks do have vectors. They only lose offline, because
+embedding the *question* needs the Coder running. So: use `search_code(deep=true)` or `ask_repo`
+with the Coder up for questions phrased in your own words, and do not tighten the keyword rules to
+chase them.
+
 ## Why not LoRA yet
 
 Fine-tuning teaches style and patterns, not facts, and anything trained in is frozen while your

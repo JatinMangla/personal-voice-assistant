@@ -518,6 +518,22 @@ run on Kaggle or a device yet.
   this benchmark's ceiling; the cross-file trace is the open ground, and `investigate` is the thing
   to judge there next. 645 tests.
 
+- 2026-10-12 (offline, no GPU): **writing the benchmark's questions down had made the real search
+  worse.** `scripts/coder_bench.py` holds all 14 questions as string literals, so it matched every
+  one of them and pushed the real code out of the top 3 on **6 of 14**; "ranks the right file first"
+  had fallen to 5-6/14 for the search Claude Code uses every day. `coder/search.py` now penalises
+  the judge's own files (`JUDGE_PENALTY = 0.2`, harsher than tests 0.35 and prose 0.6, lifted when
+  the question is itself about benchmarking): **7/14 first and zero intrusions**, `src/devices.py`
+  2 -> 1, `src/intents.py` 3 -> 2, with 3 tests pinning it. The two remaining misses were diagnosed
+  and deliberately **not** hacked around: `stop_reason` shares only 2 of the question's 6 words, so
+  this is a keyword-vs-meaning gap, and the real index already has **100 % vector coverage**
+  (2027/2027 chunks) - the answer is `search_code(deep=true)` / `ask_repo` with the Coder up, not
+  tighter keyword rules. Also promoted the ask_repo-vs-`investigate` judge out of the scratchpad
+  into `scripts/coder_compare_methods.py` (medians over repeats, prints the spread and says whether
+  the gap beats the noise; 5 tests), and verified offline against the real repo that every switch
+  default matches the docs, that E warns a similar question but not an unrelated one, and that the
+  self-test sandbox refuses `os`/`open`/`exec` while passing and failing real asserts. 653 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).

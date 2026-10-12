@@ -77,6 +77,13 @@ TEST_PATH = re.compile(r"(^|/)(tests?|androidTest)/|(^|/)test_[^/]*$|Tests?\.kt$
 PROSE_PENALTY = 0.6
 PROSE_PATH = re.compile(r"\.(md|txt|rst)$", re.I)
 PROSE_WORDS = ("doc", "docs", "readme", "plan", "log", "guide", "notes")
+# The measurement harness is the worst offender of all, because it holds the benchmark's questions
+# as string literals: measured 2026-10-12, coder_bench.py matched 14/14 of its own questions and
+# displaced the real code on 4 of them (ranking the right file first fell to 5/14). It is a judge,
+# never an answer, so it is pushed below even tests unless the question is about benchmarking.
+JUDGE_PENALTY = 0.2
+JUDGE_PATH = re.compile(r"(^|/)coder_bench\.py$|(^|/)coder_compare_methods\.py$")
+JUDGE_WORDS = ("bench", "benchmark", "judge", "variant", "baseline", "measure", "measured")
 NAME_BONUS = 1.6     # the chunk's own name holds every word of the question: this IS the answer
 MIN_COVERAGE_WEIGHT = 0.5   # a chunk holding none of the words keeps half its score
 
@@ -93,6 +100,7 @@ def _rescore(index, ranked: dict, terms: list[str]) -> tuple[dict, dict]:
             f"SELECT id, path, first, last, kind, name, text FROM chunks WHERE id IN ({marks})", list(ranked))}
     wants_tests = any("test" in t for t in terms)
     wants_prose = any(t in PROSE_WORDS for t in terms)
+    wants_judge = any(t in JUDGE_WORDS for t in terms)
     scores = {}
     for cid, row in rows.items():
         shown = index.display(row["path"])
@@ -107,6 +115,8 @@ def _rescore(index, ranked: dict, terms: list[str]) -> tuple[dict, dict]:
             weight *= TEST_PENALTY
         if not wants_prose and PROSE_PATH.search(shown):
             weight *= PROSE_PENALTY
+        if not wants_judge and JUDGE_PATH.search(shown):
+            weight *= JUDGE_PENALTY
         scores[cid] = ranked[cid] * weight
     return scores, rows
 

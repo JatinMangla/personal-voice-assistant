@@ -91,12 +91,31 @@ Nothing to redo here. A reached `ask` 14/14 named + 14/14 refs twice; D is behin
 `CODER_FOLLOWUP=1` on cost; B caught the real `slugify` bug once its schema was fixed. The details,
 including why the first B and D runs measured nothing, are in CODER_IMPROVEMENTS.md.
 
+### 0. Done offline on 2026-10-12 (no GPU needed), nothing to redo
+- **The judge was poisoning the real search:** `coder_bench.py` holds all 14 benchmark questions
+  verbatim, so it matched every one and intruded on 6 of them; first-place retrieval had fallen to
+  5-6/14. `search.py` now penalises the judge's own files (`JUDGE_PENALTY = 0.2`), which took it to
+  **7/14 with zero intrusions**, pinned by 3 tests. The remaining misses are a keyword-vs-meaning
+  gap, not a bug: the real index has **100 % vector coverage**, so `deep=true` / `ask_repo` with the
+  Coder up is the answer, and the keyword rules were deliberately NOT tightened further.
+- **`scripts/coder_compare_methods.py`** now exists in the repo (it was a scratchpad file): it is the
+  ask_repo-vs-`investigate` judge, with 5 tests of its own. Use it for step 1 below.
+- Verified offline against the real repo: every switch default matches the docs, E stores a note and
+  warns a *similar* question while leaving an unrelated one alone, and the self-test sandbox refuses
+  `os`/`open`/`exec` while passing and failing real asserts correctly.
+
 ### 1. Measure `investigate`, the agentic loop (built, never measured)
 It plans a hard question into <= 5 sub-questions, searches and answers each separately, then writes
 one answer showing its steps (`coder.investigate`, MCP tool `investigate`, 12 tests). The benchmark
-does not call it, so judge it against `ask_repo` **on the same trace questions, repeated**: the trace
-score wanders too much for one pass each. Roughly 18 model calls / ~8 min of GPU for 3 repeats of
-both methods, so do it first in a fresh session when the budget is full.
+does not call it, so use the script written for exactly this:
+```
+.venv\Scripts\python scripts\coder_compare_methods.py            # 3 repeats of both methods
+.venv\Scripts\python scripts\coder_compare_methods.py --repeats 1 --save out.json
+```
+It asks every trace question with both methods, interleaved, and compares the **medians**, because
+the trace score wanders too much for one pass each. It prints the widest spread it saw and says
+outright whether the gap beats the noise. Budget ~50-60 model calls / 8-12 min of GPU for 3 repeats,
+so do it in a fresh session when the limit is full.
 Target: it should beat `ask_repo` on the trace medians by more than the spread, and its cost
 (1 call per step + 2) has to be worth it. If it does not beat `ask_repo`, say so in the doc: it is
 still the honest answer to "work like agentic AI", and its steps make the work checkable.
