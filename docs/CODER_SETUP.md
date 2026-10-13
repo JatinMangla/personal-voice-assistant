@@ -4,7 +4,39 @@ The coding model runs on **Kaggle's free GPU**, not on your computer. So setting
 machine only means connecting the small client that Claude Code talks to. No GPU, no model
 download, no Kaggle account on that machine, and no admin rights.
 
-## The one command
+## On a machine where you canNOT clone this repo (office VM, borrowed laptop)
+
+Use the single file **`dist/jarvis_coder_installer.py`** (65 KB). It has the whole client inside
+it, so it needs no clone, no GitHub access and no second password. Copy it over however you like
+(email it to yourself, a USB stick, paste it, or open it in GitHub's web UI and press *Download
+raw*), then:
+
+```
+python jarvis_coder_installer.py
+```
+
+It asks for your `CODER_KEY` and does the rest: unpacks the client into `~/.jarvis-coder/client`,
+installs `numpy`, `httpx` and `mcp`, remembers the key so a reboot does not lose it, writes
+`.mcp.json` **in the folder you run it in** so Claude Code there picks up the tools, and prints the
+key fingerprint plus whether the Coder is up. Then reopen the editor and run `coder_status`.
+
+```
+python jarvis_coder_installer.py --key <your key>   # do not be asked
+python jarvis_coder_installer.py --uninstall        # undo everything it added
+```
+
+It reads the folder you run it in, so on that machine the Coder answers about **that** project, not
+this one. Safe to run twice, and any other MCP server already in `.mcp.json` is kept.
+
+**The one thing it cannot do for you:** installing those three packages needs to reach PyPI once. If
+a locked-down VM blocks PyPI, install them however you normally do and run the file again -
+everything else works with no internet beyond your own ngrok address.
+
+**Keep it up to date:** the file is generated, so after changing anything under `scripts/coder/` run
+`python scripts/make_coder_installer.py` and commit `dist/`. A test fails if a client module is ever
+left out of it.
+
+## The one command (on a machine that has the repo)
 
 ```
 git clone https://github.com/JatinMangla/personal-voice-assistant

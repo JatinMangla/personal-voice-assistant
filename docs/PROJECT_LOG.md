@@ -596,6 +596,24 @@ run on Kaggle or a device yet.
   Python/Kotlin test conventions, so Go's `*_test.go`, `*Test.cs`, `*_spec.rb` and PHPUnit
   `*Test.php` escape the 0.35 test penalty and would outrank real code on another project. 755 tests.
 
+- 2026-10-13: **one file connects any machine, with no clone** (`dist/jarvis_coder_installer.py`,
+  65 KB, built by `scripts/make_coder_installer.py` from `coder_installer_template.py`). The owner
+  needs the Coder on office VMs and borrowed machines where a private repo cannot be cloned; the
+  client is 12 modules / 116 KB, too much to paste, and a downloader would need a GitHub token as a
+  second secret on every machine - worse than the Coder key itself. So the whole client travels as a
+  base64 zip inside one plain Python file, checksum-verified on unpack, standard library only until
+  pip has run. **Verified end to end in a sandbox with a fake HOME, not described:** 12 files
+  unpacked **byte-identical** to the repo's, imported from the unpack (not the repo), indexed the
+  sandbox project, and `search_code` found its function with correct line numbers; `.mcp.json`
+  **kept a pre-existing unrelated MCP server**; running it twice changed nothing; `--uninstall`
+  removed only the coder entry. 16 tests, including that every client module is in the payload (so a
+  new module can never be silently left out), that the payload unzips byte-for-byte, that nothing
+  outside the standard library is imported before pip runs, and that a damaged payload is refused.
+  **A cloud agent was asked to build this and hit the weekly usage limit before committing anything;
+  its two parting claims were checked rather than trusted, and the `pywin32` one was WRONG** - `mcp`
+  declares `pywin32>=311; sys_platform == 'win32'`, so pip installs it, proven in a bare venv
+  ("MCP imports OK", pywin32 312 present). No bug existed; nothing was "fixed". 771 tests.
+
 ## Open items / next steps
 - The owner installs the app from github.com/JatinMangla/jarvis-app, pairs it, and tests
   FUTURE_PLANS §0a (the app checklist).
