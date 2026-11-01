@@ -71,6 +71,12 @@ SCREEN_MAX_AGE_SEC = 90  # a snapshot older than this is not used
 # qwen2.5-coder:14b = 9 GB, qwen3-embedding:0.6b = 0.6 GB.
 CODER_MODEL = os.environ.get("PVA_CODER_MODEL", "qwen3-coder:30b")
 CODER_FALLBACK_MODEL = "qwen2.5-coder:14b"
+# What the Start Coder dropdown may ask for. qwen3.6:27b-coding (18-19 GB, tag checked 2026-11-01) is
+# newer than the default and the same size, but it has not been measured here: try it with
+# scripts/coder_bench.py before making it the default. It thinks by default, so that is switched off.
+CODER_MODEL_CHOICES = (CODER_MODEL, CODER_FALLBACK_MODEL, "qwen3.6:27b-coding")
+CODER_THINKING_MODELS = ("qwen3.6:27b-coding",)
+CODER_NO_THINK = False                   # set by coder_main when such a model is the one running
 CODER_ALIAS = "jarvis-coder"             # every client request is answered by this one model
 CODER_EMBED_MODEL = "qwen3-embedding:0.6b"
 CODER_RERANK_REPO = "Qwen/Qwen3-Reranker-0.6B"
@@ -83,6 +89,7 @@ CODER_IDLE_MIN = 20                      # no request for this long -> the run e
 CODER_MAX_SESSION_MIN = 180              # hard cap for one run
 CODER_WARN_MIN_LEFT = 30                 # warn once under this many Coder minutes are left today
 CODER_USAGE_EVERY_MIN = 30               # GPU time is recorded this often (a killed run is not lost)
+CODER_SHUTDOWN_SEC = 30                  # at the stop, requests still open get this long to finish
 CODER_MAX_BODY_BYTES = 2_000_000
 CODER_FAILS_BEFORE_LOCKOUT = 10          # wrong keys within CODER_LOCKOUT_MIN -> 429 for wrong keys
 CODER_LOCKOUT_MIN = 15
@@ -259,7 +266,8 @@ def _secrets_bundle() -> dict:
     global _bundle_cache
     if _bundle_cache is None:
         _bundle_cache = {}
-        run_key = os.environ.get("PVA_RUN_KEY")
+        # pop: with this key the bundle opens, so Ollama, ngrok and pip must not inherit it.
+        run_key = os.environ.pop("PVA_RUN_KEY", None)
         files = list(INPUT_ROOT.glob(f"**/{SECRETS_BUNDLE_FILE}")) if run_key else []
         if files:
             import json

@@ -32,6 +32,10 @@ PAYLOAD = ""
 PAYLOAD_SHA256 = ""
 
 PACKAGES = ["numpy", "httpx", "mcp"]
+# `import mcp` also works with mcp 1.x, whose API the tools can't use (FastMCP became MCPServer in
+# 2.x): that machine would look installed and then fail in the editor. Check what is really used.
+PROBES = {"mcp": "from mcp.server.mcpserver import MCPServer"}
+PINS = {"mcp": "mcp>=2,<3"}
 DEFAULT_URL = "https://volley-gnarly-constable.ngrok-free.dev"
 MIN_PYTHON = (3, 10)
 WINDOWS = os.name == "nt"
@@ -80,16 +84,17 @@ def unpack() -> Path:
 
 def pip_install(python: Path | str) -> None:
     missing = [name for name in PACKAGES
-               if subprocess.run([str(python), "-c", f"import {name}"],
+               if subprocess.run([str(python), "-c", PROBES.get(name, f"import {name}")],
                                  capture_output=True).returncode]
     if not missing:
         say("packages", "numpy, httpx and mcp are already there")
         return
     say("packages", "installing " + ", ".join(missing))
     base = [str(python), "-m", "pip", "install", "-q"]
-    attempts = [base + missing]
+    wanted = [PINS.get(name, name) for name in missing]
+    attempts = [base + wanted]
     if sys.prefix == sys.base_prefix:        # not in a venv: --user keeps it out of system site
-        attempts.insert(0, base + ["--user"] + missing)
+        attempts.insert(0, base + ["--user"] + wanted)
     for command in attempts:
         if subprocess.run(command).returncode == 0:
             return
@@ -114,6 +119,8 @@ def ask_for_key() -> str:
 
 def remember_key(key: str) -> None:
     """Save it so a new terminal still has it. No admin rights needed either way."""
+    if not KEY_PATTERN.match(key):  # it is written into a shell profile as it stands
+        sys.exit("[coder] That does not look like the key; nothing was saved.")
     if WINDOWS:
         subprocess.run(["setx", "CODER_KEY", key], capture_output=True)
         say("CODER_KEY", "saved as a user variable (reopen your editor to pick it up)")

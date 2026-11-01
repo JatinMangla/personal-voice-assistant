@@ -70,7 +70,11 @@ def by_symbol(index, terms: list[str], limit: int = CANDIDATES) -> list[int]:
 # 2026-10-09: "which function decides Jarvis must not start" returned 5 test files and a README
 # section, and none of the real code. A test is the answer only when the question asks for one.
 TEST_PENALTY = 0.35
-TEST_PATH = re.compile(r"(^|/)(tests?|androidTest)/|(^|/)test_[^/]*$|Tests?\.kt$|_test\.py$")
+TEST_PATH = re.compile(
+    r"(^|/)(tests?|__tests__|spec|androidTest)/|(^|/)test_[^/]*$"
+    r"|Tests?\.(kt|java|cs|php|swift|scala)$"             # FooTest.java, FooTests.cs, FooTest.php
+    r"|_(test|spec)\.(py|go|rs|rb|exs|dart|cpp|cc|c)$"    # foo_test.go, foo_spec.rb
+    r"|\.(test|spec)\.[cm]?[jt]sx?$")                     # foo.test.ts, foo.spec.jsx
 # Docs describe the code in the question's own words, so they beat the code on keywords while
 # answering "where is it" worse. First observed 2026-10-09: "which limit forbids starting now"
 # put README.md and a doc above budget.start_blocker.

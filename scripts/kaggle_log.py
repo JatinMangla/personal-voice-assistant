@@ -40,7 +40,8 @@ def log_lines(raw: str) -> list[str]:
 
 
 def main() -> None:
-    lines = int(sys.argv[1]) if len(sys.argv) > 1 else 200
+    wanted = sys.argv[1] if len(sys.argv) > 1 else ""
+    lines = int(wanted) if wanted.isdecimal() else 200
     kernel = f"{os.environ['KAGGLE_USERNAME'].strip()}/{os.environ.get('JARVIS_NOTEBOOK', 'jarvis')}"
     status = kaggle("kernels", "status", kernel)
     print("STATUS:", (status.stdout or status.stderr).strip())

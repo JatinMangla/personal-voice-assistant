@@ -9,6 +9,10 @@ and the result table). The full history is in [PROJECT_LOG.md](PROJECT_LOG.md).
 (the 14B) and G, then combine the keepers. Read the two "trap" sections of CODER_IMPROVEMENTS.md
 before you measure anything -- they invalidated three runs in the last session.
 
+**Update 2026-11-01:** read CLAUDE.md, "Status (2026-11-01)" first: the audit changed the
+self-test sandbox, the idle stop and the model dropdown. A new experiment is ready: run
+`qwen3.6:27b-coding` through `scripts/coder_bench.py` against the current default.
+
 ## State at handover (2026-10-09, second session)
 
 - `main` is clean at **23d1ed5** (NOT pushed: pushing deploys to Kaggle, the owner decides when);

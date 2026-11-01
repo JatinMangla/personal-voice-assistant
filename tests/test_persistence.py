@@ -44,9 +44,19 @@ def test_kaggle_credentials_new_token_and_legacy_key(monkeypatch):
 
 def test_first_run_returns_none():
     store, calls = MemoryStore("me", KEY, {}), []
-    fake_kaggle(store, [(1, "404 - Not Found")], calls)
+    fake_kaggle(store, [(1, "404 - Not Found"), (0, "ref,title,size\nme/other-data,Other,1KB"),
+                        (1, "404 Not Found")], calls)
     assert store.load() is None
     assert not store.exists
+
+
+def test_a_passing_error_that_mentions_404_is_not_a_first_run():
+    # "404" in an error text once meant "first run": an empty memory, for a dataset that exists.
+    store, calls = MemoryStore("me", KEY, {}), []
+    fake_kaggle(store, [(1, "500 upstream: 404 from CDN, retry"),
+                        (0, "ref,title,size\nme/assistant-memory,Memory,1MB")], calls)
+    with pytest.raises(StorageError):
+        store.load()
 
 
 def test_first_run_kaggle_403_for_missing_private_dataset():

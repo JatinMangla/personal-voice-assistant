@@ -2,8 +2,9 @@
 import hashlib
 from pathlib import Path
 
-SECRET_SUFFIXES = {".enc", ".jks", ".keystore", ".p12", ".pfx", ".pem", ".key", ".gpg", ".kdbx"}
-SECRET_NAMES = {"kaggle.json", "id_rsa", "id_ed25519", "local.properties", "ngrok.yml"}
+SECRET_SUFFIXES = {".enc", ".env", ".jks", ".keystore", ".p12", ".pfx", ".pem", ".key", ".gpg", ".kdbx"}
+SECRET_NAMES = {"kaggle.json", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "local.properties",
+                "ngrok.yml", ".netrc", ".npmrc", ".pypirc", ".htpasswd", "token.txt", "tokens.json"}
 SECRET_WORDS = ("secret", "password", "passwd", "credential", "private_key", "apikey", "api_key")
 SECRET_DIRS = {"jarvis-keys", ".ssh", ".gnupg", ".aws"}
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "build", "__pycache__", ".gradle",

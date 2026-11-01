@@ -340,6 +340,6 @@ def test_the_model_is_passed_through_the_start_script_and_the_workflow():
     trigger = next(data[k] for k in data if str(k) in ("on", "True"))
     model = trigger["workflow_dispatch"]["inputs"]["model"]
     assert model["default"] == config.CODER_MODEL, "the 30B must stay the default"
-    assert set(model["options"]) == {config.CODER_MODEL, config.CODER_FALLBACK_MODEL}
+    assert set(model["options"]) == set(config.CODER_MODEL_CHOICES)  # nothing the run would ignore
     env = next(step["env"] for step in data["jobs"]["start"]["steps"] if "env" in step)
     assert "PVA_CODER_MODEL" in env

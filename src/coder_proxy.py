@@ -27,6 +27,8 @@ MAX_RERANK_DOCS = 50
 MAX_RERANK_CHARS = 6000
 MAX_EMBED_INPUTS = 64
 MAX_EMBED_CHARS = 8000
+OLLAMA_TIMEOUT_SEC = 900.0
+MAX_REQUEST_SEC = OLLAMA_TIMEOUT_SEC + 60
 
 
 class ProxyState:
@@ -40,6 +42,7 @@ class ProxyState:
         self.requests = 0
         self.bytes_out = 0
         self.busy = 0                       # requests being answered right now
+        self.last_begin = now()
         self.failures: list[float] = []     # times of wrong keys
 
     def touch(self) -> None:
@@ -47,8 +50,12 @@ class ProxyState:
             self.last_request = self.now()
 
     def idle_seconds(self) -> float:
+        """Busy counts as "not idle", but only as long as any request can really last: a count
+        that was never handed back must not keep the GPU running to the session cap."""
         with self.lock:
-            return 0.0 if self.busy else self.now() - self.last_request
+            if self.busy and self.now() - self.last_begin < MAX_REQUEST_SEC:
+                return 0.0
+            return self.now() - self.last_request
 
     def count(self, nbytes: int) -> None:
         with self.lock:
@@ -65,6 +72,7 @@ class ProxyState:
         that merely stays open would keep the GPU running for hours."""
         with self.lock:
             self.busy += 1
+            self.last_begin = self.now()
             if not background:
                 self.last_request = self.now()
 
@@ -126,6 +134,8 @@ def prepare_chat(path: str, body: dict) -> dict:
         options["num_predict"] = clamp_reply(options.get("num_predict"), config.CODER_MAX_REPLY_TOKENS)
         body["options"] = options
         body["keep_alive"] = -1
+        if config.CODER_NO_THINK:
+            body["think"] = False
     else:
         wanted = body.get("max_tokens", body.get("max_completion_tokens"))
         body["max_tokens"] = clamp_reply(wanted, config.CODER_MAX_REPLY_TOKENS)
@@ -154,7 +164,7 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
     transport: lets tests replace the connection to Ollama."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     upstream = httpx.AsyncClient(base_url=ollama_url, transport=transport,
-                                 timeout=httpx.Timeout(900.0, connect=5.0))
+                                 timeout=httpx.Timeout(OLLAMA_TIMEOUT_SEC, connect=5.0))
 
     def log(method: str, path: str, status: int, started: float, nbytes: int) -> None:
         print(f"[coder] {method} {path} {status} in {time.time() - started:.1f}s ({nbytes} B)")
@@ -168,7 +178,11 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
                 return JSONResponse({"error": "too many wrong keys, try later"}, 429)
             state.wrong_key()
             return JSONResponse({"error": "unauthorized"}, 401)
-        if int(request.headers.get("content-length") or 0) > config.CODER_MAX_BODY_BYTES:
+        try:
+            too_big = int(request.headers.get("content-length") or 0) > config.CODER_MAX_BODY_BYTES
+        except ValueError:
+            too_big = True
+        if too_big:
             return JSONResponse({"error": "request too big"}, 413)
         # Real work keeps the Coder alive. A health check is only a look at it, and background
         # housekeeping is not a person using it: neither may postpone the idle stop.
@@ -218,10 +232,13 @@ def create_app(key: str, ollama_url: str, state: ProxyState, rerank=None, transp
                     sent += len(chunk)
                     yield chunk
             finally:
-                await resp.aclose()
+                # The bookkeeping first: when the client hangs up this code is being cancelled,
+                # and the first `await` here would raise and skip everything after it. A
+                # request that stays "busy" means the idle stop never fires.
                 state.count(sent)
                 state.end(background)
                 log(method, path, resp.status_code, started, sent)
+                await resp.aclose()
 
         return StreamingResponse(pieces(), status_code=resp.status_code, media_type=content_type)
 

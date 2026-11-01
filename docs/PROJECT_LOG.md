@@ -624,3 +624,21 @@ run on Kaggle or a device yet.
 - On a laptop, try screen sharing.
 - Optional: rebuild the model cache so it includes `ddgs`.
 - Later: home PC hosting, Home Assistant tools (with spoken confirmation), Phase 5 fine-tune.
+
+## 2026-11-01: Coder audit and hardening
+
+The owner asked for an in-depth audit, then narrowed it to the Coder. Every suspect was run against
+the old code before it was called a bug. CLAUDE.md, "Status (2026-11-01)", has the list of fixes.
+
+- **The self-test sandbox could be escaped** (proven: it wrote a file outside its folder). It is now
+  a default-deny audit hook. The first version "stopped everything" only because the boot script
+  itself was refused, so all attacks AND honest tests died on the same line; that is why the check
+  now runs honest tests beside 20 attacks.
+- **The idle stop could be defeated by a client hanging up** (proven with a real ASGI disconnect).
+- Version check on 2026-11-01. Web and client packages: newest PyPI versions pass all tests, nothing
+  to change. `transformers` is at 5.x (hence `dtype`). Ollama (0.40.13) and the Kaggle-side web
+  packages stay unpinned for now: no exact version is proven on the T4s, so the log prints them and
+  the pin comes after a good run. `kaggle` 2.2.5 is pinned in the Coder's workflows. Actions moved
+  from tags to exact commits of checkout 7.0.1 and setup-python 7.1.0.
+- Kept on purpose: `OLLAMA_NUM_PARALLEL=1` (measured), `cuda_v13` skipped (T4 driver), cryptography
+  not upgraded on Kaggle (its own packages need that version), `qwen3-coder:30b` as the default.

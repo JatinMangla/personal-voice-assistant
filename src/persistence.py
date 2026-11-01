@@ -39,11 +39,11 @@ class MemoryStore:
         with tempfile.TemporaryDirectory() as tmp:
             result = self._kaggle("datasets", "download", self.dataset, "-p", tmp,
                                   "--unzip", "--force")
-            output = (result.stdout + result.stderr).lower()
             if result.returncode != 0:
-                # Kaggle answers 403 (not 404) for a private dataset that doesn't exist
-                # yet, so ask the list of our own datasets to tell "first run" apart.
-                if "404" in output or "not found" in output or not self._memory_dataset_exists():
+                # Kaggle answers 403 (not 404) for a private dataset that doesn't exist yet, and
+                # a passing failure can mention "404" too. So the error text decides nothing:
+                # only the list of our own datasets can say "first run".
+                if not self._memory_dataset_exists():
                     return None
                 raise StorageError(f"Could not download memory: {result.stderr.strip()[-300:]}")
             files = list(Path(tmp).rglob(config.MEMORY_FILE_NAME))

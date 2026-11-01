@@ -43,8 +43,10 @@ def main() -> None:
         (Path(tmp) / "dataset-metadata.json").write_text(json.dumps(dataset_metadata(user, slug)))
         result = subprocess.run(["kaggle", "datasets", "version", "-p", tmp, "-m", f"code {note}"],
                                 capture_output=True, text=True)
-    print((result.stdout + result.stderr).strip())
-    if result.returncode != 0:
+    output = (result.stdout + result.stderr).strip()
+    print(output)
+    # The kaggle tool can print an error and still exit with 0 (CLAUDE.md gotcha 10).
+    if result.returncode != 0 or "error" in output.lower():
         sys.exit(f"Upload failed. Is the dataset really called '{user}/{slug}'?")
     print("Uploaded. Kaggle needs about a minute to process it; the next Jarvis start uses it.")
 

@@ -21,14 +21,84 @@ MAX_FILE_CHARS = 120_000
 SKIP_COPY = shutil.ignore_patterns(*safety.SKIP_DIRS, "android", "*.zip", "*.apk", "*.enc")
 
 # Experiment B: the draft's OWN asserts are run, in a folder holding nothing but the draft. That is
-# model-written code, so the rules are the benchmark's: only these imports, no exec/eval/open/file
-# access, a short timeout, and only pure Python files. It is a behaviour check, not a build step.
+# model-written code on the developer's PC, and what the model writes can be steered by text in the
+# files it reads. Two layers:
+# 1. unsafe_code() reads the source and refuses the obvious, so the refusal can name the reason.
+#    This alone is NOT a sandbox: `__builtins__.__dict__[...]` or `json.codecs.sys.modules['os']`
+#    walked straight past the first version of it (found 2026-11-01, it ran a shell command).
+# 2. SANDBOX_BOOT runs the test under a default-deny audit hook (PEP 578), inside the interpreter.
+#    It sees what really happens however the code got there, and it can't be removed from Python.
+#    It is still not an operating-system sandbox: a memory-corruption bug in CPython would get
+#    past it, which is why bytecode tricks (code.__new__, marshal) are refused too.
 SELFTEST_IMPORTS = {"re", "math", "typing", "itertools", "collections", "string", "__future__",
                     "unicodedata", "dataclasses", "functools", "operator", "enum", "datetime",
                     "decimal", "fractions", "heapq", "bisect", "copy", "textwrap", "json"}
-SELFTEST_BANNED = {"exec", "eval", "open", "__import__", "compile", "input", "breakpoint"}
+SELFTEST_BANNED = {"exec", "eval", "open", "__import__", "compile", "breakpoint", "getattr", "setattr",
+                   "delattr", "vars", "globals", "locals", "memoryview"}
+# Double-underscore names a normal class or test uses. Everything else (__class__, __globals__,
+# __subclasses__, __builtins__ ...) is the road out of a Python sandbox.
+SELFTEST_DUNDERS = {"__name__", "__doc__", "__init__", "__post_init__", "__str__", "__repr__",
+                    "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__hash__", "__len__",
+                    "__iter__", "__next__", "__contains__", "__getitem__", "__setitem__", "__bool__",
+                    "__call__", "__enter__", "__exit__", "__add__", "__sub__", "__mul__", "__main__"}
 SELFTEST_TIMEOUT_SEC = 25
 MAX_SELFTEST_CHARS = 4_000
+MAX_SELFTEST_MEMORY = 1_000_000_000     # bytes, where the system can limit it (not on Windows)
+REFUSED_EXIT = 97                       # the hook ended the run; that is not a failed assert
+# Loaded before the door closes, because afterwards nothing outside the test folder can be read.
+SELFTEST_PRELOAD = sorted(SELFTEST_IMPORTS) + ["_strptime", "encodings.idna", "encodings.unicode_escape",
+                                               "traceback", "_colorize", "locale", "calendar"]
+SANDBOX_BOOT = """\
+import os, sys, types
+
+folder = os.getcwd()
+own = frozenset(sys.argv[1:])
+sys.dont_write_bytecode = True
+for name in {preload!r}:
+    try:
+        __import__(name)
+    except ImportError:
+        pass
+try:
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, ({memory}, {memory}))
+except (ImportError, ValueError, OSError):
+    pass
+sys.path[:] = [folder]
+sys.argv = ["selftest_main.py"]
+inside = folder + os.sep
+main = inside + "selftest_main.py"
+SAFE = frozenset(("compile", "exec", "builtins.id", "object.__getattr__", "object.__setattr__",
+                  "object.__delattr__", "sys._getframe", "sys._getframemodulename", "time.sleep",
+                  "sys.excepthook", "sys.unraisablehook", "cpython._PySys_ClearAuditHooks"))
+
+
+def in_folder(path, folder=folder, inside=inside):
+    # type() and plain string tests only: a str subclass or a replaced os.path can't lie here.
+    return type(path) is str and (path == folder or path.startswith(inside)) and ".." not in path
+
+
+def hook(event, args, safe=SAFE, own=own, in_folder=in_folder, write=sys.__stderr__.write,
+         stop=os._exit, refused={refused}):
+    if event in safe:
+        return
+    if event == "open" and args[1] in ("r", "rb") and in_folder(args[0]):
+        return
+    if event in ("os.listdir", "os.scandir") and in_folder(args[0]):
+        return
+    if event == "import" and args[0] in own:
+        return
+    write("sandbox refused: " + event + " " + str(args[0] if args else "")[:60] + "\\n")
+    stop(refused)
+
+
+with open(main, encoding="utf-8") as f:
+    code = compile(f.read(), main, "exec")
+module = sys.modules["__main__"] = types.ModuleType("__main__")
+module.__file__ = main
+sys.addaudithook(hook)
+exec(code, module.__dict__)
+"""
 
 
 def target_path(path: str, roots: list[Path]) -> tuple[Path, Path] | None:
@@ -135,6 +205,11 @@ def unsafe_code(code: str, own_modules: set | None = None) -> str | None:
     except SyntaxError as e:
         return f"syntax error on line {e.lineno}: {e.msg}"
     for node in ast.walk(tree):
+        word = node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else ""
+        if word.startswith("__") and word.endswith("__") and word not in SELFTEST_DUNDERS:
+            return f"uses {word}, which the test sandbox does not allow"
+        if isinstance(node, ast.Name) and word in SELFTEST_BANNED:  # not re.compile
+            return f"calls {word}(), which the test sandbox does not allow"
         if isinstance(node, ast.Import):
             modules = [a.name.split(".")[0] for a in node.names]
         elif isinstance(node, ast.ImportFrom):
@@ -144,9 +219,6 @@ def unsafe_code(code: str, own_modules: set | None = None) -> str | None:
         outside = [m for m in modules if m not in allowed]
         if outside:
             return f"imports {', '.join(outside)}, which the test sandbox does not allow"
-        name = getattr(node.func, "id", "") if isinstance(node, ast.Call) else ""
-        if name in SELFTEST_BANNED:
-            return f"calls {name}(), which the test sandbox does not allow"
     return None
 
 
@@ -170,19 +242,26 @@ def run_draft_test(files: dict[str, str], test: str) -> tuple[bool | None, str]:
         for rel, content in python_files.items():
             (folder / Path(rel).name).write_text(content, encoding="utf-8")
         (folder / "selftest_main.py").write_text(test, encoding="utf-8")
-        env = {"PYTHONDONTWRITEBYTECODE": "1", "PATH": os.environ.get("PATH", ""),
-               "SYSTEMROOT": os.environ.get("SYSTEMROOT", "")}
+        boot = folder / "sandbox_boot.py"
+        boot.write_text(SANDBOX_BOOT.format(preload=SELFTEST_PRELOAD, memory=MAX_SELFTEST_MEMORY,
+                                            refused=REFUSED_EXIT), encoding="utf-8")
+        # Nothing of this PC's environment goes along: no keys, no PATH (Windows needs SYSTEMROOT).
+        env = {"SYSTEMROOT": os.environ.get("SYSTEMROOT", "")} if os.name == "nt" else {}
+        # The real interpreter, not a venv's launcher: killing a launcher can leave its child.
+        python = getattr(sys, "_base_executable", None) or sys.executable
         try:
-            # -S -E -s: no site-packages, no PYTHON* variables, no user site. The folder itself
-            # stays importable (which -I would take away), so the draft can be imported by name.
-            result = subprocess.run([sys.executable, "-S", "-E", "-s", "selftest_main.py"], cwd=folder,
-                                    capture_output=True, text=True, timeout=SELFTEST_TIMEOUT_SEC,
-                                    env=env)
+            # -I -S -B: no PYTHON* variables, no user or site packages, no .pyc files.
+            result = subprocess.run([python, "-I", "-S", "-B", str(boot), *sorted(own)], cwd=folder,
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE, text=True, errors="replace",
+                                    timeout=SELFTEST_TIMEOUT_SEC, env=env)
         except (subprocess.TimeoutExpired, OSError) as e:
             return None, f"self-test could not be run ({type(e).__name__})"
+    tail = (result.stderr.strip().splitlines() or ["no output"])[-1][:200]
+    if result.returncode == REFUSED_EXIT:
+        return None, f"self-test not run to the end: {tail}"
     if result.returncode == 0:
         return True, "the model's own asserts passed"
-    tail = (result.stderr.strip().splitlines() or ["no output"])[-1][:200]
     return False, f"the model's own test failed: {tail}"
 
 

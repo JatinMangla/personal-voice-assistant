@@ -17,6 +17,7 @@ on:
         options:
           - "qwen3-coder:30b"
           - "qwen2.5-coder:14b"
+          - "qwen3.6:27b-coding"
 
 permissions:
   contents: read
@@ -26,11 +27,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      # Exact commits and versions: the step below runs with every key of the project.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - run: pip install -q kaggle cryptography
+      - run: pip install -q kaggle==2.2.5 cryptography==50.0.2
       - run: python scripts/start_coder.py
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || vars.KAGGLE_USERNAME }}

@@ -190,5 +190,8 @@ class CoderClient:
             return None
         if resp.status_code != 200:
             return None
-        scores = resp.json().get("scores")
+        try:
+            scores = resp.json().get("scores")
+        except (ValueError, AttributeError):
+            return None
         return scores if isinstance(scores, list) and len(scores) == len(documents) else None

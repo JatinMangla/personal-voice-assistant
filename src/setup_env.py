@@ -60,8 +60,11 @@ def install_basics() -> None:
     # -U kaggle: the new-style API token needs a recent kaggle CLI. cryptography is
     # NOT upgraded: Kaggle's own packages (pyopenssl etc.) need the version it has.
     pip = [sys.executable, "-m", "pip", "install", "-q"]
-    subprocess.run(pip + ["-U", "kaggle"], check=True)
-    subprocess.run(pip + ["cryptography"], check=True)
+    # The secrets can't be opened yet (that needs cryptography), so the one-time key is still in
+    # the environment: keep it away from what pip downloads and runs.
+    env = {k: v for k, v in os.environ.items() if k != "PVA_RUN_KEY"}
+    subprocess.run(pip + ["-U", "kaggle"], check=True, env=env)
+    subprocess.run(pip + ["cryptography"], check=True, env=env)
 
 
 def install_packages(cache: Path | None) -> None:

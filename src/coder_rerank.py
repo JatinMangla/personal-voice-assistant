@@ -56,8 +56,11 @@ def load(device: str = "cuda:1"):
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(config.CODER_RERANK_REPO, padding_side="left")
-        model = AutoModelForCausalLM.from_pretrained(
-            config.CODER_RERANK_REPO, torch_dtype=torch.float16).to(device).eval()
+        try:
+            model = AutoModelForCausalLM.from_pretrained(config.CODER_RERANK_REPO, dtype=torch.float16)
+        except TypeError:  # transformers before `dtype` replaced `torch_dtype`
+            model = AutoModelForCausalLM.from_pretrained(config.CODER_RERANK_REPO, torch_dtype=torch.float16)
+        model = model.to(device).eval()
         reranker = Reranker(tokenizer, model, device)
         reranker("test question", ["def f(): pass"])   # first call is slow: do it now
         print(f"[coder] reranker ready on {device} in {time.time() - t:.0f}s")

@@ -25,6 +25,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGES = ["numpy", "httpx", "mcp"]
+# `import mcp` also works with mcp 1.x, whose API the tools can't use (FastMCP became MCPServer in
+# 2.x): that machine would look installed and then fail in the editor. Check what is really used.
+PROBES = {"mcp": "from mcp.server.mcpserver import MCPServer"}
+PINS = {"mcp": "mcp>=2,<3"}
 DEFAULT_URL = "https://volley-gnarly-constable.ngrok-free.dev"
 WINDOWS = os.name == "nt"
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32,}$")   # what scripts/make_key.py prints
@@ -55,14 +59,16 @@ def ensure_venv() -> Path:
 def ensure_packages(python: Path) -> None:
     missing = []
     for name in PACKAGES:
-        probe = subprocess.run([str(python), "-c", f"import {name}"], capture_output=True)
+        probe = subprocess.run([str(python), "-c", PROBES.get(name, f"import {name}")],
+                               capture_output=True)
         if probe.returncode:
             missing.append(name)
     if not missing:
         say("packages", "numpy, httpx and mcp are installed")
         return
     say("packages", "installing " + ", ".join(missing))
-    subprocess.run([str(python), "-m", "pip", "install", "-q", *missing], check=True)
+    subprocess.run([str(python), "-m", "pip", "install", "-q", *[PINS.get(n, n) for n in missing]],
+                   check=True)
 
 
 def write_mcp_config(python: Path) -> None:
@@ -106,6 +112,8 @@ def ask_for_key() -> str:
 
 def remember_key(key: str) -> None:
     """Store the key so a new terminal still has it, without needing admin rights."""
+    if not KEY_PATTERN.match(key):  # it is written into a shell profile as it stands
+        sys.exit("[setup] That does not look like a key from make_key.py; nothing was saved.")
     if WINDOWS:
         subprocess.run(["setx", "CODER_KEY", key], check=True, capture_output=True)
         say("CODER_KEY", "saved as a user variable (reopen your editor to pick it up)")

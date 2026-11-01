@@ -163,6 +163,13 @@ def create_alias(base: str) -> None:
         raise RuntimeError(f"ollama create failed: {result.stderr.strip()[-200:]}")
 
 
+def seconds_to_limit(meters) -> float | None:
+    """Seconds of GPU time left before the tightest meter's automatic stop, or None."""
+    from budget import minutes_until_stop
+    left = [m for m in (minutes_until_stop(meter, config.STOP_AT) for meter in meters or []) if m is not None]
+    return min(left) * 60.0 if left else None
+
+
 def wanted_models() -> tuple[str, ...]:
     """Which model to try first, then the fallback. `config.CODER_MODEL` is frozen at import from
     the environment, which a Start-button run does not have; experiment F needs to compare the 30B
@@ -175,7 +182,7 @@ def wanted_models() -> tuple[str, ...]:
         from_bundle = None
     if from_bundle:
         name = from_bundle.strip()
-        if name in (config.CODER_MODEL, config.CODER_FALLBACK_MODEL):
+        if name in config.CODER_MODEL_CHOICES:
             chosen = name
             print(f"[coder] model from the run's settings: {chosen}")
         else:
@@ -195,12 +202,13 @@ def load_coder_model(pull) -> str:
             if not pull(base):
                 raise RuntimeError("download failed or timed out")
             print(f"[coder] {base} downloaded in {time.time() - t:.0f}s")
+            config.CODER_NO_THINK = base in config.CODER_THINKING_MODELS
             create_alias(base)
             config.PHASE = f"loading {base} onto the GPUs"
             t = time.time()
-            first = ollama_json("/api/chat", {
+            first = ollama_json("/api/chat", no_think({
                 "model": config.CODER_ALIAS, "stream": False, "keep_alive": -1,
-                "messages": [{"role": "user", "content": "Say OK."}], "options": {"num_predict": 5}})
+                "messages": [{"role": "user", "content": "Say OK."}], "options": {"num_predict": 5}}))
             print(f"[coder] {base} loaded and answered in {time.time() - t:.0f}s ({speed_report(first)})")
             probe_speed()
             return base
@@ -210,21 +218,43 @@ def load_coder_model(pull) -> str:
     raise RuntimeError(f"No coder model could be started. Last error: {last_error}")
 
 
+def no_think(body: dict) -> dict:
+    return {**body, "think": False} if config.CODER_NO_THINK else body
+
+
 def probe_speed() -> None:
     """Two short tests so the log says how fast this model really is on this run."""
     try:
-        read = ollama_json("/api/chat", {
+        read = ollama_json("/api/chat", no_think({
             "model": config.CODER_ALIAS, "stream": False, "keep_alive": -1,
             "messages": [{"role": "user", "content": "def f(x): return x + 1\n" * SPEED_PROMPT_LINES
                           + "\nHow many functions are defined above? Answer with the number only."}],
-            "options": {"num_predict": 8}})
-        write = ollama_json("/api/chat", {
+            "options": {"num_predict": 8}}))
+        write = ollama_json("/api/chat", no_think({
             "model": config.CODER_ALIAS, "stream": False, "keep_alive": -1,
             "messages": [{"role": "user", "content": "Write a Python function that reverses a string."}],
-            "options": {"num_predict": 120}})
+            "options": {"num_predict": 120}}))
         print(f"[coder] speed: reading ({speed_report(read)}); writing ({speed_report(write)})")
     except Exception as e:
         print(f"[coder] speed test skipped ({type(e).__name__})")
+
+
+def program_versions() -> str:
+    """What this run really used, for the log: Ollama and the web packages are not pinned, so
+    this is how a working set can be pinned later, and how a run that broke can be compared."""
+    from importlib.metadata import PackageNotFoundError, version
+    found = []
+    try:
+        result = subprocess.run(["ollama", "--version"], capture_output=True, text=True, timeout=10)
+        found.append(result.stdout.strip().splitlines()[-1].replace("ollama version is ", "ollama "))
+    except (OSError, IndexError, subprocess.SubprocessError):
+        found.append("ollama ?")
+    for name in ("fastapi", "uvicorn", "httpx", "transformers", "torch"):
+        try:
+            found.append(f"{name} {version(name)}")
+        except PackageNotFoundError:
+            pass
+    return ", ".join(found)
 
 
 def other_run_active(username: str, env: dict, slug: str) -> bool:
@@ -233,27 +263,42 @@ def other_run_active(username: str, env: dict, slug: str) -> bool:
     return result.returncode == 0 and kernel_active(result.stdout)
 
 
-def watchdog(state, recorder, server, started: float, over_limit_of, warning: dict | None = None) -> None:
+def watchdog(state, recorder, server, started: float, over_limit_of, warning: dict | None = None,
+             limit_at: float | None = None) -> None:
     """Every 5 s: end the run when idle, past the session cap, or at a free limit. Every usage
-    record also refreshes the limit warning that /health publishes, and says it once in the log."""
+    record also refreshes the limit warning that /health publishes, and says it once in the log.
+
+    limit_at: when the GPU limit is reached if nothing changes. Usage is only recorded every 30
+    minutes (each record reads and saves the whole memory), so a run started with 6 minutes left
+    would otherwise overrun by 24. Nothing in one tick may end this loop: a dead watchdog keeps
+    the GPU running until Kaggle's own limit."""
     last_record = time.time()
     over_limit = None
     announced: set[str] = set()
     while not server.should_exit:
         time.sleep(5)
-        if time.time() - last_record >= config.CODER_USAGE_EVERY_MIN * 60:
-            last_record = time.time()
-            meters = recorder.record()
-            over_limit = over_limit_of(meters)
-            if warning is not None:
-                warning.clear()
-                note = limit_warning(meters, now_ist(), time.time() - started) if meters else None
-                if note:
-                    warning.update(note)
-                    if note["meter"] not in announced:   # once per meter: the log stays readable
-                        announced.add(note["meter"])
-                        print(f"[coder] free-limit warning: {note['text']}")
-        reason = stop_reason(state.idle_seconds(), time.time() - started, over_limit)
+        try:
+            if time.time() - last_record >= config.CODER_USAGE_EVERY_MIN * 60:
+                last_record = time.time()
+                meters = recorder.record()
+                over_limit = over_limit_of(meters)
+                left = seconds_to_limit(meters)
+                if left is not None:
+                    limit_at = time.time() + left
+                if warning is not None:
+                    warning.clear()
+                    note = limit_warning(meters, now_ist(), time.time() - started) if meters else None
+                    if note:
+                        warning.update(note)
+                        if note["meter"] not in announced:   # once per meter: the log stays readable
+                            announced.add(note["meter"])
+                            print(f"[coder] free-limit warning: {note['text']}")
+            if not over_limit and limit_at is not None and time.time() >= limit_at:
+                over_limit = "GPU time"
+            reason = stop_reason(state.idle_seconds(), time.time() - started, over_limit)
+        except Exception as e:
+            print(f"[coder] watchdog problem: {type(e).__name__}: {str(e)[:120]}")
+            reason = stop_reason(0.0, time.time() - started, over_limit)
         if reason:
             print(f"[coder] stopping: {reason}")
             server.should_exit = True
@@ -285,7 +330,6 @@ def _startup_guard(ctx: dict) -> None:
 def _run(ctx: dict, started: float) -> None:
     import setup_env
     setup_env.install_basics()
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "httpx", "fastapi", "uvicorn"], check=False)
 
     import crypto
     from budget import Budget, current_meters, describe_reset, start_blocker
@@ -300,6 +344,8 @@ def _run(ctx: dict, started: float) -> None:
     ngrok_domain = config.get_secret("NGROK_DOMAIN")
     force = bool(config.get_secret("CODER_FORCE", required=False))
     username, kaggle_env = config.kaggle_credentials()
+    # After the secrets were read: the one-time key is out of the environment by now.
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "httpx", "fastapi", "uvicorn"], check=False)
 
     if not force and other_run_active(username, kaggle_env, config.JARVIS_NOTEBOOK_SLUG):
         print("\n[coder] NOT STARTING: Jarvis is running. They share one address and one memory, "
@@ -339,6 +385,7 @@ def _run(ctx: dict, started: float) -> None:
         print("[coder] the embedding model did not download: meaning-search is off this run")
     devices = setup_env.ollama_devices()
     print(f"[coder] Ollama computes on: {', '.join(devices) or 'unknown'}")
+    print(f"[coder] versions: {program_versions()}")
     if devices and all(d.startswith("cpu") for d in devices):
         print("[coder] WARNING: no GPU found, so answers will be very slow. Check Accelerator = GPU T4 x2.")
 
@@ -360,8 +407,11 @@ def _run(ctx: dict, started: float) -> None:
         print(f"[coder] free-limit warning: {first['text']}")
     app = create_app(coder_key, config.OLLAMA_URL, state, rerank=reranker,
                      warning=lambda: dict(warning) or None)
+    # timeout_graceful_shutdown: without it the stop waits for every open request, so one stuck
+    # client would keep the GPU running after the watchdog has decided to end the run.
     server = uvicorn.Server(uvicorn.Config(app, host=config.APP_HOST, port=config.APP_PORT,
-                                           log_level="warning", access_log=False))
+                                           log_level="warning", access_log=False,
+                                           timeout_graceful_shutdown=config.CODER_SHUTDOWN_SEC))
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
     ngrok = tunnel.start(ngrok_token, ngrok_domain, None, coder=True)
@@ -378,7 +428,10 @@ def _run(ctx: dict, started: float) -> None:
         over = budget.over_stop(meters) if meters else None
         return over.name if over else None
 
-    threading.Thread(target=watchdog, args=(state, recorder, server, started, over_limit_of, warning),
+    # Time since the last record is not in `meters` yet: count from then, with Kaggle's start-up.
+    left = seconds_to_limit(meters)
+    limit_at = None if left is None else recorder.recorded_until + left - recorder.overhead_pending
+    threading.Thread(target=watchdog, args=(state, recorder, server, started, over_limit_of, warning, limit_at),
                      daemon=True).start()
     try:
         while server_thread.is_alive():
