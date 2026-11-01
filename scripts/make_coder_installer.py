@@ -48,6 +48,7 @@ def build_payload(files: list[Path]) -> bytes:
             inside = ("coder/" + path.name) if path.parent == CLIENT_DIR else path.name
             info = zipfile.ZipInfo(inside, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3      # else it records the building OS, so Windows and Linux differ
             info.external_attr = 0o644 << 16
             zf.writestr(info, source_bytes(path))
     return buffer.getvalue()

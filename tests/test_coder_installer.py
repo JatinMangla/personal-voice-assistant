@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -35,6 +36,16 @@ def payload_bytes(text: str) -> bytes:
         if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "PAYLOAD":
             return base64.b64decode("".join(ast.literal_eval(node.value).split()))
     raise AssertionError("the generated file has no PAYLOAD")
+
+
+def unpacked(text: str) -> dict[str, bytes]:
+    with zipfile.ZipFile(io.BytesIO(payload_bytes(text))) as zf:
+        return {name: zf.read(name) for name in zf.namelist()}
+
+
+def around_payload(text: str) -> str:
+    """The generated file without the zip and its digest."""
+    return re.sub(r'PAYLOAD = """.*?"""|PAYLOAD_SHA256 = "\w+"', "", text, flags=re.S)
 
 
 @pytest.fixture(scope="module")
@@ -74,11 +85,16 @@ def test_the_payload_checksum_in_the_file_matches_the_payload(generated):
 
 
 def test_the_generated_file_is_valid_python_and_rebuilds_identically(generated):
+    """The zip itself can differ between systems (their zlib may compress differently), so what is
+    compared is what it holds, plus everything around it. Same machine: identical bytes."""
     ast.parse(generated)                       # would raise if the template broke
-    before = INSTALLER.read_bytes()
+    files = maker.client_files()
+    assert maker.build_payload(files) == maker.build_payload(files), "the zip is not deterministic"
     subprocess.run([sys.executable, str(SCRIPTS / "make_coder_installer.py")],
                    check=True, capture_output=True, cwd=ROOT)
-    assert INSTALLER.read_bytes() == before, "rebuilding changed the file; the zip is not deterministic"
+    rebuilt = INSTALLER.read_text(encoding="utf-8")
+    assert unpacked(rebuilt) == unpacked(generated), "dist/ is out of date: rebuild and commit it"
+    assert around_payload(rebuilt) == around_payload(generated), "dist/ is out of date: rebuild it"
 
 
 def test_the_unpacked_client_is_importable(generated, tmp_path):
