@@ -247,6 +247,18 @@ def test_a_reranker_reply_that_is_not_json_means_no_better_order():
     assert CoderClient("https://x.test", "k" * 40, http=http).rerank("q", ["a"]) is None
 
 
+# --- the kaggle tool -----------------------------------------------------------------------------------
+def test_kaggle_is_always_installed_with_six():
+    """kaggle 2.2.5 crashes on start without six, and does not ask for it. Found by the first CI run:
+    the code upload failed, and every Start button would have."""
+    installs = [line for path in (ROOT / ".github" / "workflows").glob("*.yml")
+                for line in path.read_text(encoding="utf-8-sig").splitlines()
+                if "pip install" in line and "kaggle" in line]
+    assert len(installs) == 4
+    assert all("six==" in line and "kaggle==" in line for line in installs)
+    assert '"kaggle", "six"]' in (ROOT / "src" / "setup_env.py").read_text(encoding="utf-8")
+
+
 # --- the installers -----------------------------------------------------------------------------------
 def load(path: Path):
     spec = importlib.util.spec_from_file_location(path.stem, path)

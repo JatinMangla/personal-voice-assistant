@@ -339,6 +339,10 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
 39. (2026-11-01) **Inside a cancelled anyio scope every `await` raises at once**, so in a streaming
     generator's `finally`, do the bookkeeping BEFORE the first `await`. `await resp.aclose()` came
     first, so a client that hung up skipped `state.end()`, and `busy` stayed 1 forever.
+40. (2026-11-01) **`kaggle` 2.2.5 crashes on a clean install** (`No module named 'six'`): it imports
+    six without declaring it. Every workflow pins `kaggle==2.2.5 six==1.17.0`, and `install_basics`
+    installs six too. A pin only proves the version number, so try it in a clean venv first: the
+    laptop's checks passed and only the first CI run showed this.
 35. (2026-10-09) **The Coder benchmark's trace score is noisy: up to 5 steps on the same question**
     (10, 7, 7, 6, 5 across five runs). Never decide an experiment from one run's trace number;
     `coder_bench.py` now asks each trace question 3 times and scores the median (`--trace-repeats`).
@@ -360,7 +364,9 @@ Kaggle yet**, and the new `tests.yml` has not run on Linux yet.
   text that merely says 404, the one-time run key leaves the environment before pip and Ollama run,
   both installers check for the mcp 2.x API (1.x looked installed, then crashed) and refuse a bad
   key, `jarvis-log.yml` no longer runs typed input as shell code, the Coder's workflows use exact
-  action commits and tool versions, `transformers` 5's `dtype` is used by the reranker.
+  action commits and tool versions, `transformers` 5's `dtype` is used by the reranker. The first
+  CI run found `kaggle` broken on a clean install (gotcha 40), and the installer build now gives
+  the same bytes on Windows and Linux.
 - **New, not measured:** `qwen3.6:27b-coding` (18-19 GB, same size as the 30B) is a choice in the
   Start Coder dropdown. The default is unchanged; decide with `scripts/coder_bench.py`. The log now
   prints `[coder] versions:`, which is what is needed to pin Ollama and the web packages later.

@@ -34,7 +34,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - run: pip install -q kaggle==2.2.5 cryptography==50.0.2
+      # six: kaggle 2.2.5 needs it but does not declare it (CLAUDE.md gotcha 40).
+      - run: pip install -q kaggle==2.2.5 six==1.17.0 cryptography==50.0.2
       - run: python scripts/start_coder.py
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || vars.KAGGLE_USERNAME }}

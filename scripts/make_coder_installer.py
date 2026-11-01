@@ -34,9 +34,14 @@ def client_files() -> list[Path]:
     return modules + [ENTRY]
 
 
+def source_bytes(path: Path) -> bytes:
+    """The file as git stores it (LF), whatever line endings this checkout has on disk."""
+    return path.read_bytes().replace(b"\r\n", b"\n")
+
+
 def build_payload(files: list[Path]) -> bytes:
-    """A deterministic zip: same sources in, byte-identical zip out, so committing the installer
-    does not churn the diff when nothing really changed."""
+    """A deterministic zip: same sources in, byte-identical zip out, on any system, so committing
+    the installer does not churn the diff when nothing really changed."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
         for path in files:
@@ -44,7 +49,7 @@ def build_payload(files: list[Path]) -> bytes:
             info = zipfile.ZipInfo(inside, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o644 << 16
-            zf.writestr(info, path.read_bytes())
+            zf.writestr(info, source_bytes(path))
     return buffer.getvalue()
 
 
@@ -63,7 +68,7 @@ def main() -> None:
     text = text.replace(DIGEST_MARK, f'PAYLOAD_SHA256 = "{digest}"\n')
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(text, encoding="utf-8")
+    OUT.write_text(text, encoding="utf-8", newline="\n")
     kb = len(text.encode("utf-8")) / 1024
     print(f"[build] {len(files)} client files -> {len(payload) / 1024:.0f} KB zipped")
     print(f"[build] wrote {OUT.relative_to(ROOT).as_posix()} ({kb:.0f} KB)")

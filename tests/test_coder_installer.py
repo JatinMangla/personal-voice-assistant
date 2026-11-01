@@ -60,7 +60,7 @@ def test_the_payload_unzips_to_the_real_sources_byte_for_byte(generated, tmp_pat
     for path in maker.client_files():
         rel = ("coder/" + path.name) if path.parent == maker.CLIENT_DIR else path.name
         got = (tmp_path / rel).read_bytes()
-        assert hashlib.sha256(got).hexdigest() == hashlib.sha256(path.read_bytes()).hexdigest(), rel
+        assert hashlib.sha256(got).hexdigest() == hashlib.sha256(maker.source_bytes(path)).hexdigest(), rel
 
 
 def test_the_payload_checksum_in_the_file_matches_the_payload(generated):

@@ -63,7 +63,8 @@ def install_basics() -> None:
     # The secrets can't be opened yet (that needs cryptography), so the one-time key is still in
     # the environment: keep it away from what pip downloads and runs.
     env = {k: v for k, v in os.environ.items() if k != "PVA_RUN_KEY"}
-    subprocess.run(pip + ["-U", "kaggle"], check=True, env=env)
+    # six: kaggle 2.2.5 needs it but does not declare it (CLAUDE.md gotcha 40).
+    subprocess.run(pip + ["-U", "kaggle", "six"], check=True, env=env)
     subprocess.run(pip + ["cryptography"], check=True, env=env)
 
 
