@@ -351,8 +351,17 @@ Nothing can run on a phone from here; the owner installs from `jarvis-app` and r
 ## Status (2026-11-01, latest): Coder audit and hardening
 A full audit of the Coder; every fix below was proven on the old code first and is pinned in
 `tests/test_coder_hardening.py`. 835 tests pass (1 skipped) on the installed packages and on the newest
-PyPI versions (FastAPI 0.162, Starlette 1.10); `pip-audit` finds nothing. **None of it has run on
-Kaggle yet**, and the new `tests.yml` has not run on Linux yet.
+PyPI versions (FastAPI 0.162, Starlette 1.10) and on GitHub's Linux runners (`tests.yml`, green
+from bc82a58 on); `pip-audit` finds nothing.
+**Verified live on Kaggle (2026-11-01, Coder run, default model):** ready in 462 s, reading ~1964
+tok/s, writing ~68 tok/s, reranker on with transformers 5.16.1; `ask_repo` right in 10 s; a real
+`draft_code` passed its own self-test inside the new sandbox; a client hung up mid-answer and
+the idle stop still fired exactly 1200 s after the last real request (log: `stopping: 20 min
+without a request`, finished 4 s later); no usage-recording or watchdog errors. While the laptop
+pre-computes, `/health` shows `idle_seconds: 0` for moments: that is a batch in flight, not a
+stuck count (a stuck count reads 0 every time). The set proven in that run, for a later pin:
+ollama 0.40.13, fastapi 0.141.1, uvicorn 0.52.4, httpx 0.28.1, transformers 5.16.1, torch 2.11.0.
+Still unproven live: stopping early at a free limit, and `qwen3.6:27b-coding`.
 - **The self-test "sandbox" was not one** (gotcha 38): model-written code ran a shell command on
   the laptop, and B is on by default. Now a default-deny audit hook; 20 real escapes stay inside.
 - **Two ways the GPU kept running:** a client hanging up left the proxy "busy" for good, so the

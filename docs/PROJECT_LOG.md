@@ -643,3 +643,15 @@ the old code before it was called a bug. CLAUDE.md, "Status (2026-11-01)", has t
   from tags to exact commits of checkout 7.0.1 and setup-python 7.1.0.
 - Kept on purpose: `OLLAMA_NUM_PARALLEL=1` (measured), `cuda_v13` skipped (T4 driver), cryptography
   not upgraded on Kaggle (its own packages need that version), `qwen3-coder:30b` as the default.
+
+Shipped in ccc8566, ac7d13d and bc82a58, then run for real. The voice fixes are on the local branch
+`voice-fixes`, not on `main`. The first CI run earned its keep at once: `kaggle` 2.2.5 crashes on a
+clean install (gotcha 40), which had already failed the code upload and would have failed every
+Start button, including the version pinned that same day. The laptop's checks could not show it.
+
+Live result: ready in 462 s, `ask_repo` 10 s, a real draft passed its self-test in the new sandbox,
+and after a deliberate hang-up the run stopped itself 1200 s after the last real request. The first
+reading of that test said "False": `idle_seconds` dropped back to 0. Watching it beside the index's
+vector count showed why (the laptop's pre-compute batches were in flight), and the criterion was
+what was wrong, not the fix. The `pip` conflict lines at 17 s are Kaggle's own packages (Colab,
+moviepy, bigframes), unrelated to this project.
